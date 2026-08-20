@@ -1,0 +1,34 @@
+# Root Git Ignore
+
+# Environment & Secrets
+.env
+.env.local
+*.env
+
+# Python / Backend
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+backend/uploads/raw/*
+!backend/uploads/raw/.gitkeep
+backend/uploads/cleaned/*
+!backend/uploads/cleaned/.gitkeep
+backend/uploads/artifacts/*
+!backend/uploads/artifacts/.gitkeep
+*.db
+*.sqlite3
+
+# Node / Frontend
+node_modules/
+.next/
+out/
+build/
+dist/
+*.log
+
+# OS & IDEs
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

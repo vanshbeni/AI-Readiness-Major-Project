@@ -1,49 +1,225 @@
-import React from 'react';
-import { Activity, ShieldCheck, Sparkles, Database, FileSpreadsheet, ArrowRight } from 'lucide-react';
+'use client';
 
-export default function HomePage() {
+import React, { useState } from 'react';
+import { Header } from '../components/Header';
+import { Stepper, StepKey } from '../components/Stepper';
+import { UploadStep } from '../components/UploadStep';
+import { ObjectiveStep } from '../components/ObjectiveStep';
+import { HealthScoreGauge } from '../components/HealthScoreGauge';
+import { ProfileTable } from '../components/ProfileTable';
+import { RecommendationChecklist } from '../components/RecommendationChecklist';
+import { BeforeAfterDiff } from '../components/BeforeAfterDiff';
+import { ModelLeaderboard } from '../components/ModelLeaderboard';
+import { ExportHub } from '../components/ExportHub';
+import {
+  api,
+  DatasetSummary,
+  DatasetSample,
+  FullDiagnostic,
+  ExecutionResult,
+  BenchmarkLeaderboard,
+} from '../services/api';
+import { ArrowRight, ArrowLeft, Loader2, Sparkles, CheckCircle2, AlertTriangle } from 'lucide-react';
+
+export default function Home() {
+  const [currentStep, setCurrentStep] = useState<StepKey>('upload');
+  const [completedSteps, setCompletedSteps] = useState<StepKey[]>([]);
+
+  // State entities
+  const [dataset, setDataset] = useState<DatasetSummary | null>(null);
+  const [sample, setSample] = useState<DatasetSample | null>(null);
+  const [diagnostics, setDiagnostics] = useState<FullDiagnostic | null>(null);
+  const [executionResult, setExecutionResult] = useState<ExecutionResult | null>(null);
+  const [leaderboard, setLeaderboard] = useState<BenchmarkLeaderboard | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // 1. Dataset Loaded handler
+  const handleDatasetLoaded = (d: DatasetSummary, s: DatasetSample) => {
+    setDataset(d);
+    setSample(s);
+    setCompletedSteps(['upload']);
+    setCurrentStep('objective');
+  };
+
+  // 2. Objective Selected handler
+  const handleObjectiveSubmit = async (problemType: string, targetColumn: string) => {
+    if (!dataset) return;
+    setError(null);
+    try {
+      await api.setObjective(dataset.id, problemType, targetColumn);
+      const diag = await api.runDiagnostics(dataset.id);
+      setDiagnostics(diag);
+      setCompletedSteps((prev) => Array.from(new Set([...prev, 'objective'])));
+      setCurrentStep('diagnostic');
+    } catch (err: any) {
+      setError(err.message || 'Diagnostic profiling failed');
+    }
+  };
+
+  // 3. Execution Pipeline handler
+  const handleExecutePipeline = async (approvals: Record<string, boolean>) => {
+    if (!dataset) return;
+    setError(null);
+    try {
+      await api.updateApprovals(dataset.id, approvals);
+      const exec = await api.executePipeline(dataset.id);
+      setExecutionResult(exec);
+      
+      // Auto-trigger model benchmarking
+      const bench = await api.runBenchmarks(dataset.id);
+      setLeaderboard(bench);
+
+      setCompletedSteps((prev) => Array.from(new Set([...prev, 'recommendations', 'results'])));
+      setCurrentStep('results');
+    } catch (err: any) {
+      setError(err.message || 'Pipeline execution or benchmarking failed');
+    }
+  };
+
+  // Reset flow
+  const handleReset = () => {
+    setDataset(null);
+    setSample(null);
+    setDiagnostics(null);
+    setExecutionResult(null);
+    setLeaderboard(null);
+    setCompletedSteps([]);
+    setCurrentStep('upload');
+    setError(null);
+  };
+
   return (
-    <main style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
-      <div style={{ maxWidth: '800px', width: '100%', textAlign: 'center' }}>
-        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.4rem 1rem', borderRadius: '9999px', background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.3)', color: '#38bdf8', fontSize: '0.875rem', fontWeight: 500, marginBottom: '1.5rem' }}>
-          <Sparkles size={16} />
-          <span>Explainable Pre-ML Diagnostic Platform</span>
-        </div>
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+      <Header datasetName={dataset?.filename} onReset={handleReset} />
 
-        <h1 style={{ fontSize: '3rem', fontWeight: 800, lineHeight: 1.15, marginBottom: '1rem', background: 'linear-gradient(135deg, #ffffff 0%, #94a3b8 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-          AI Data Readiness Platform
-        </h1>
+      {dataset && (
+        <Stepper
+          currentStep={currentStep}
+          onStepClick={(step) => setCurrentStep(step)}
+          completedSteps={completedSteps}
+        />
+      )}
 
-        <p style={{ fontSize: '1.125rem', color: '#94a3b8', lineHeight: 1.6, marginBottom: '2.5rem' }}>
-          Before asking <em>"Which model should I train?"</em>, ask <em>"Is my data ready for ML?"</em>. Profile quality, get explainable fix recommendations, and verify dataset health.
-        </p>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', marginBottom: '2.5rem', textAlign: 'left' }}>
-          <div style={{ padding: '1.25rem', borderRadius: '12px', background: 'rgba(20, 27, 41, 0.7)', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
-            <Activity size={24} color="#38bdf8" style={{ marginBottom: '0.75rem' }} />
-            <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#f1f5f9', marginBottom: '0.25rem' }}>Data Health Score</h3>
-            <p style={{ fontSize: '0.85rem', color: '#94a3b8' }}>Composite 0–100 health metrics based on statistical profiling.</p>
+      <main style={{ flex: 1, padding: '1.5rem 2rem 4rem 2rem', maxWidth: 1200, width: '100%', margin: '0 auto' }}>
+        {error && (
+          <div style={{
+            padding: '1rem 1.25rem',
+            borderRadius: 10,
+            background: 'rgba(244, 63, 94, 0.12)',
+            border: '1px solid rgba(244, 63, 94, 0.3)',
+            color: '#fb7185',
+            fontSize: '0.9rem',
+            marginBottom: '1.5rem',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.6rem',
+          }}>
+            <AlertTriangle size={18} />
+            <span>{error}</span>
           </div>
+        )}
 
-          <div style={{ padding: '1.25rem', borderRadius: '12px', background: 'rgba(20, 27, 41, 0.7)', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
-            <ShieldCheck size={24} color="#10b981" style={{ marginBottom: '0.75rem' }} />
-            <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#f1f5f9', marginBottom: '0.25rem' }}>Explainable Fixes</h3>
-            <p style={{ fontSize: '0.85rem', color: '#94a3b8' }}>AI-grounded remediation reasoning with human-in-the-loop approvals.</p>
+        {/* STEP 1: Upload & Ingestion */}
+        {currentStep === 'upload' && (
+          <UploadStep onDatasetLoaded={handleDatasetLoaded} />
+        )}
+
+        {/* STEP 2: Objective & Target Column */}
+        {currentStep === 'objective' && dataset && sample && (
+          <ObjectiveStep
+            dataset={dataset}
+            sample={sample}
+            onSubmit={handleObjectiveSubmit}
+          />
+        )}
+
+        {/* STEP 3: Diagnostic Profiling & Health Score Dashboard */}
+        {currentStep === 'diagnostic' && diagnostics && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+              <div>
+                <h2 style={{ fontSize: '1.85rem', fontWeight: 800 }}>
+                  Pre-ML <span className="gradient-text">Diagnostic Assessment</span>
+                </h2>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                  Target: <strong>{diagnostics.objective?.target_column}</strong> ({diagnostics.objective?.problem_type}) • {diagnostics.profile.summary.row_count} rows × {diagnostics.profile.summary.col_count} columns
+                </p>
+              </div>
+
+              <button
+                className="btn-primary"
+                onClick={() => {
+                  setCompletedSteps((prev) => Array.from(new Set([...prev, 'diagnostic'])));
+                  setCurrentStep('recommendations');
+                }}
+              >
+                <span>Review {diagnostics.recommendations.length} Explainable Fixes</span>
+                <ArrowRight size={16} />
+              </button>
+            </div>
+
+            {/* Health Score Dial */}
+            <HealthScoreGauge score={diagnostics.health_score} stageName="Raw Dataset Profile" />
+
+            {/* Feature Matrix Table */}
+            <ProfileTable columns={diagnostics.profile.columns} />
           </div>
+        )}
 
-          <div style={{ padding: '1.25rem', borderRadius: '12px', background: 'rgba(20, 27, 41, 0.7)', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
-            <Database size={24} color="#8b5cf6" style={{ marginBottom: '0.75rem' }} />
-            <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#f1f5f9', marginBottom: '0.25rem' }}>Model Benchmark</h3>
-            <p style={{ fontSize: '0.85rem', color: '#94a3b8' }}>Candidate model ranking and downloadable scikit-learn pipelines.</p>
+        {/* STEP 4: Explainable Recommendations Checklist */}
+        {currentStep === 'recommendations' && diagnostics && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <button
+                className="btn-secondary"
+                onClick={() => setCurrentStep('diagnostic')}
+                style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}
+              >
+                <ArrowLeft size={14} /> Back to Health Score
+              </button>
+            </div>
+
+            <RecommendationChecklist
+              recommendations={diagnostics.recommendations}
+              onExecute={handleExecutePipeline}
+            />
           </div>
-        </div>
+        )}
 
-        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem 1.5rem', borderRadius: '8px', background: '#38bdf8', color: '#0a0d14', fontWeight: 600, fontSize: '0.95rem', cursor: 'pointer' }}>
-          <FileSpreadsheet size={18} />
-          <span>Upload Dataset to Diagnose</span>
-          <ArrowRight size={16} />
-        </div>
-      </div>
-    </main>
+        {/* STEP 5: Cleaned Results, Benchmarks & Export Hub */}
+        {currentStep === 'results' && dataset && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+              <div>
+                <h2 style={{ fontSize: '1.85rem', fontWeight: 800 }}>
+                  Model-Ready <span className="gradient-text">Dataset & Candidate Models</span>
+                </h2>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                  Transformations executed cleanly. Review before/after improvements, model benchmark leaderboard, and download artifacts.
+                </p>
+              </div>
+
+              <button
+                className="btn-secondary"
+                onClick={() => setCurrentStep('recommendations')}
+                style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}
+              >
+                <ArrowLeft size={14} /> Modify Fix Approvals
+              </button>
+            </div>
+
+            {/* Before vs After Quality Diff */}
+            {executionResult && <BeforeAfterDiff result={executionResult} />}
+
+            {/* Candidate ML Model Leaderboard */}
+            {leaderboard && <ModelLeaderboard leaderboard={leaderboard} />}
+
+            {/* Export & Download Hub */}
+            <ExportHub datasetId={dataset.id} />
+          </div>
+        )}
+      </main>
+    </div>
   );
 }

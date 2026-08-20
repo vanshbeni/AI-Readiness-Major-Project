@@ -1,4 +1,4 @@
-# 🛡️ AI Data Readiness Platform (AegisMind)
+# 🛡️ AI Data Readiness Platform 
 
 > **An Explainable Pre-ML Data Diagnosis, Cleaning & Model Recommendation System**  
 > *Closing the critical gap between messy raw data and robust machine learning pipelines.*

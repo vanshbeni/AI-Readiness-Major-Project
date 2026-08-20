@@ -1,7 +1,25 @@
+import logging
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
+from app.core.database import init_db
 from app.api.v1.router import api_router
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Starting up AI Data Readiness Platform Backend...")
+    try:
+        init_db()
+    except Exception as e:
+        logger.error(f"Error initializing DB tables on startup: {e}")
+    yield
+    logger.info("Shutting down AI Data Readiness Platform Backend...")
+
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -10,6 +28,7 @@ app = FastAPI(
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 # Configure CORS
@@ -28,9 +47,9 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 @app.get("/")
 async def root():
     return {
-        "message": "Welcome to AI Data Readiness Platform API",
+        "message": "AI Data Readiness Platform API is Running",
         "docs": "/docs",
-        "health": f"{settings.API_V1_STR}/health"
+        "health": f"{settings.API_V1_STR}/health",
     }
 
 
