@@ -63,7 +63,7 @@ async def run_pipeline_execution(
     # Execute Transformation Pipeline
     cleaned_filename = f"{dataset_id}_cleaned.csv"
     cleaned_path = os.path.join(settings.CLEANED_DATA_DIR, cleaned_filename)
-    script_filename = f"{dataset_id}_pipeline.py"
+    script_filename = f"{dataset_id}_pipeline.py.txt"
     script_path = os.path.join(settings.ARTIFACTS_DIR, script_filename)
 
     try:

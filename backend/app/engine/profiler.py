@@ -58,9 +58,12 @@ def infer_column_type(series: pd.Series, col_name: str) -> str:
     # 6. Check if Chronological Date String (e.g. "January 1, 2020", "2019-11-01", "01/05/2021")
     if any(k in col_lower for k in ["date", "added", "created", "timestamp", "time", "dob"]) or len(sample_strs) > 5:
         try:
-            parsed = pd.to_datetime(sample_strs, errors="coerce")
-            if parsed.notna().mean() >= 0.75:
-                return "datetime"
+            import warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                parsed = pd.to_datetime(sample_strs, format="mixed", errors="coerce")
+                if parsed.notna().mean() >= 0.75:
+                    return "datetime"
         except Exception:
             pass
 

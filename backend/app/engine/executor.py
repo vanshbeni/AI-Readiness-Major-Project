@@ -73,7 +73,10 @@ def execute_pipeline(
             col = r.get("column")
             if col and col in df.columns and col != target_col:
                 try:
-                    dt_parsed = pd.to_datetime(df[col], errors="coerce")
+                    import warnings
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        dt_parsed = pd.to_datetime(df[col], format="mixed", errors="coerce")
                     year_col = f"{col}_year"
                     month_col = f"{col}_month"
                     df[year_col] = dt_parsed.dt.year.fillna(dt_parsed.dt.year.median() if dt_parsed.dt.year.notna().any() else 2020)
@@ -81,7 +84,7 @@ def execute_pipeline(
                     df = df.drop(columns=[col])
                     applied_steps.append(f"Datetime Engineering: Parsed '{col}' into '{year_col}' and '{month_col}'.")
                     script_lines.append(f"    if '{col}' in df.columns:")
-                    script_lines.append(f"        dt_p = pd.to_datetime(df['{col}'], errors='coerce')")
+                    script_lines.append(f"        dt_p = pd.to_datetime(df['{col}'], format='mixed', errors='coerce')")
                     script_lines.append(f"        df['{year_col}'] = dt_p.dt.year.fillna(dt_p.dt.year.median())")
                     script_lines.append(f"        df['{month_col}'] = dt_p.dt.month.fillna(6)")
                     script_lines.append(f"        df = df.drop(columns=['{col}'])")
