@@ -54,13 +54,13 @@ export const ObjectiveStep: React.FC<ObjectiveStepProps> = ({ dataset, sample, o
                 padding: '1.25rem',
                 borderRadius: 12,
                 cursor: 'pointer',
-                background: problemType === 'classification' ? 'rgba(56, 189, 248, 0.12)' : 'rgba(255, 255, 255, 0.02)',
-                border: problemType === 'classification' ? '2px solid #38bdf8' : '1px solid var(--border)',
+                background: problemType === 'classification' ? 'rgba(124, 58, 237, 0.05)' : '#fafbfc',
+                border: problemType === 'classification' ? '2px solid #7c3aed' : '1px solid var(--border)',
                 transition: 'all 0.2s ease',
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.5rem' }}>
-                <Layers size={20} color={problemType === 'classification' ? '#38bdf8' : 'var(--text-dim)'} />
+                <Layers size={20} color={problemType === 'classification' ? '#7c3aed' : 'var(--text-dim)'} />
                 <h4 style={{ fontSize: '1rem', fontWeight: 700 }}>Classification</h4>
               </div>
               <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
@@ -74,7 +74,7 @@ export const ObjectiveStep: React.FC<ObjectiveStepProps> = ({ dataset, sample, o
                 padding: '1.25rem',
                 borderRadius: 12,
                 cursor: 'pointer',
-                background: problemType === 'regression' ? 'rgba(16, 185, 129, 0.12)' : 'rgba(255, 255, 255, 0.02)',
+                background: problemType === 'regression' ? 'rgba(16, 185, 129, 0.05)' : '#fafbfc',
                 border: problemType === 'regression' ? '2px solid #10b981' : '1px solid var(--border)',
                 transition: 'all 0.2s ease',
               }}
@@ -103,7 +103,7 @@ export const ObjectiveStep: React.FC<ObjectiveStepProps> = ({ dataset, sample, o
                 flex: 1,
                 padding: '0.75rem 1rem',
                 borderRadius: 10,
-                background: '#0d131f',
+                background: '#ffffff',
                 border: '1px solid var(--border)',
                 color: 'var(--text-main)',
                 fontSize: '0.95rem',
@@ -133,13 +133,13 @@ export const ObjectiveStep: React.FC<ObjectiveStepProps> = ({ dataset, sample, o
           <div style={{ overflowX: 'auto', borderRadius: 8, border: '1px solid var(--border)' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem', textAlign: 'left' }}>
               <thead>
-                <tr style={{ background: 'rgba(255, 255, 255, 0.04)', borderBottom: '1px solid var(--border)' }}>
+                <tr style={{ background: '#f8f9fb', borderBottom: '1px solid var(--border)' }}>
                   {sample.columns.map((c) => (
                     <th key={c} style={{
                       padding: '0.5rem 0.75rem',
                       fontWeight: 600,
-                      color: c === targetColumn ? '#38bdf8' : 'var(--text-muted)',
-                      background: c === targetColumn ? 'rgba(56, 189, 248, 0.08)' : 'transparent',
+                      color: c === targetColumn ? '#7c3aed' : 'var(--text-muted)',
+                      background: c === targetColumn ? 'rgba(124, 58, 237, 0.04)' : 'transparent',
                     }}>
                       {c} {c === targetColumn && '★'}
                     </th>
@@ -148,12 +148,12 @@ export const ObjectiveStep: React.FC<ObjectiveStepProps> = ({ dataset, sample, o
               </thead>
               <tbody>
                 {sample.sample_data.slice(0, 5).map((row, rIdx) => (
-                  <tr key={rIdx} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.04)' }}>
+                  <tr key={rIdx} style={{ borderBottom: '1px solid #f1f5f9' }}>
                     {sample.columns.map((c) => (
                       <td key={c} style={{
                         padding: '0.45rem 0.75rem',
-                        color: row[c] === null ? '#fb7185' : 'var(--text-main)',
-                        background: c === targetColumn ? 'rgba(56, 189, 248, 0.04)' : 'transparent',
+                        color: row[c] === null ? '#e11d48' : 'var(--text-main)',
+                        background: c === targetColumn ? 'rgba(124, 58, 237, 0.02)' : 'transparent',
                       }}>
                         {row[c] === null ? '<null>' : String(row[c])}
                       </td>

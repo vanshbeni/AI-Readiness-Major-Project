@@ -17,7 +17,7 @@ export const HealthScoreGauge: React.FC<HealthScoreGaugeProps> = ({ score, stage
   let scoreColor = '#10b981'; // Green
   if (comp < 60) scoreColor = '#f43f5e'; // Rose
   else if (comp < 75) scoreColor = '#f59e0b'; // Amber
-  else if (comp < 85) scoreColor = '#38bdf8'; // Cyan
+  else if (comp < 85) scoreColor = '#7c3aed'; // Purple (was cyan)
 
   const subScoreList = [
     { label: 'Missing Values (25%)', val: score.sub_scores.missingness_score },
@@ -51,7 +51,7 @@ export const HealthScoreGauge: React.FC<HealthScoreGaugeProps> = ({ score, stage
               cx="85"
               cy="85"
               r={radius}
-              stroke="rgba(255, 255, 255, 0.08)"
+              stroke="rgba(0, 0, 0, 0.06)"
               strokeWidth="12"
               fill="transparent"
             />
@@ -82,14 +82,14 @@ export const HealthScoreGauge: React.FC<HealthScoreGaugeProps> = ({ score, stage
         {/* 6 Sub-Scores Bars */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem' }}>
           {subScoreList.map((sub, i) => {
-            const barColor = sub.val >= 85 ? '#10b981' : sub.val >= 65 ? '#38bdf8' : sub.val >= 50 ? '#f59e0b' : '#f43f5e';
+            const barColor = sub.val >= 85 ? '#10b981' : sub.val >= 65 ? '#7c3aed' : sub.val >= 50 ? '#f59e0b' : '#f43f5e';
             return (
               <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem' }}>
                   <span style={{ color: 'var(--text-muted)' }}>{sub.label}</span>
                   <span style={{ fontWeight: 700, color: barColor }}>{sub.val}%</span>
                 </div>
-                <div style={{ width: '100%', height: 6, background: 'rgba(255, 255, 255, 0.08)', borderRadius: 4, overflow: 'hidden' }}>
+                <div style={{ width: '100%', height: 6, background: 'rgba(0, 0, 0, 0.05)', borderRadius: 4, overflow: 'hidden' }}>
                   <div
                     style={{
                       width: `${sub.val}%`,
@@ -110,7 +110,7 @@ export const HealthScoreGauge: React.FC<HealthScoreGaugeProps> = ({ score, stage
       <div style={{
         padding: '0.85rem 1rem',
         borderRadius: 10,
-        background: 'rgba(255, 255, 255, 0.03)',
+        background: '#f8f9fb',
         border: '1px solid var(--border)',
         display: 'flex',
         alignItems: 'flex-start',
@@ -118,7 +118,7 @@ export const HealthScoreGauge: React.FC<HealthScoreGaugeProps> = ({ score, stage
         fontSize: '0.85rem',
         color: 'var(--text-muted)',
       }}>
-        <Info size={18} color="#38bdf8" style={{ flexShrink: 0, marginTop: 2 }} />
+        <Info size={18} color="#7c3aed" style={{ flexShrink: 0, marginTop: 2 }} />
         <div>
           <strong style={{ color: 'var(--text-main)' }}>Diagnostic Assessment: </strong>
           {score.summary_text}

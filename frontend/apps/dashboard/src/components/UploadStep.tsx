@@ -55,9 +55,9 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onDatasetLoaded }) => {
         <div style={{
           padding: '0.85rem 1.25rem',
           borderRadius: 10,
-          background: 'rgba(244, 63, 94, 0.12)',
-          border: '1px solid rgba(244, 63, 94, 0.3)',
-          color: '#fb7185',
+          background: 'rgba(244, 63, 94, 0.06)',
+          border: '1px solid rgba(244, 63, 94, 0.2)',
+          color: '#e11d48',
           fontSize: '0.875rem',
         }}>
           {error}
@@ -79,8 +79,8 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onDatasetLoaded }) => {
           padding: '3.5rem 2rem',
           textAlign: 'center',
           cursor: 'pointer',
-          borderColor: isDragging ? '#38bdf8' : 'var(--border)',
-          background: isDragging ? 'rgba(56, 189, 248, 0.05)' : 'var(--bg-card)',
+          borderColor: isDragging ? '#7c3aed' : 'var(--border)',
+          background: isDragging ? 'rgba(124, 58, 237, 0.03)' : 'var(--bg-card)',
           transition: 'all 0.2s ease',
           display: 'flex',
           flexDirection: 'column',
@@ -102,11 +102,11 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onDatasetLoaded }) => {
           width: 64,
           height: 64,
           borderRadius: '50%',
-          background: 'rgba(56, 189, 248, 0.1)',
+          background: 'rgba(124, 58, 237, 0.06)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          color: '#38bdf8',
+          color: '#7c3aed',
         }}>
           {loading ? <Loader2 size={32} className="animate-spin" /> : <UploadCloud size={32} />}
         </div>
@@ -129,7 +129,7 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onDatasetLoaded }) => {
       {/* Quick Curated Demo Datasets */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 600 }}>
-          <Sparkles size={16} color="#38bdf8" />
+          <Sparkles size={16} color="#7c3aed" />
           <span>Or test with a pre-configured capstone benchmark dataset:</span>
         </div>
 

@@ -46,19 +46,19 @@ export const Stepper: React.FC<StepperProps> = ({ currentStep, onStepClick, comp
                 padding: '0.5rem 0.9rem',
                 borderRadius: 10,
                 background: isActive
-                  ? 'rgba(56, 189, 248, 0.12)'
+                  ? 'rgba(124, 58, 237, 0.08)'
                   : isCompleted
-                  ? 'rgba(16, 185, 129, 0.08)'
+                  ? 'rgba(16, 185, 129, 0.06)'
                   : 'transparent',
                 border: isActive
-                  ? '1px solid #38bdf8'
+                  ? '1px solid #7c3aed'
                   : isCompleted
                   ? '1px solid rgba(16, 185, 129, 0.3)'
                   : '1px solid transparent',
                 color: isActive
-                  ? '#38bdf8'
+                  ? '#7c3aed'
                   : isCompleted
-                  ? '#34d399'
+                  ? '#059669'
                   : 'var(--text-dim)',
                 cursor: isClickable ? 'pointer' : 'not-allowed',
                 fontWeight: isActive ? 700 : 500,
@@ -73,7 +73,7 @@ export const Stepper: React.FC<StepperProps> = ({ currentStep, onStepClick, comp
               <div style={{
                 width: 24,
                 height: 1,
-                background: isCompleted ? 'rgba(16, 185, 129, 0.4)' : 'rgba(255, 255, 255, 0.1)',
+                background: isCompleted ? 'rgba(16, 185, 129, 0.4)' : '#e2e8f0',
               }} />
             )}
           </React.Fragment>

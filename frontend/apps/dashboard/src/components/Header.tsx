@@ -14,7 +14,7 @@ export const Header: React.FC<HeaderProps> = ({ datasetName, onReset }) => {
       justifyContent: 'space-between',
       padding: '1.25rem 2rem',
       borderBottom: '1px solid var(--border)',
-      background: 'rgba(7, 9, 14, 0.85)',
+      background: 'rgba(255, 255, 255, 0.92)',
       backdropFilter: 'blur(12px)',
       position: 'sticky',
       top: 0,
@@ -25,13 +25,13 @@ export const Header: React.FC<HeaderProps> = ({ datasetName, onReset }) => {
           width: 38,
           height: 38,
           borderRadius: 10,
-          background: 'linear-gradient(135deg, #38bdf8 0%, #3b82f6 100%)',
+          background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          boxShadow: '0 0 15px rgba(56, 189, 248, 0.4)',
+          boxShadow: '0 2px 10px rgba(124, 58, 237, 0.3)',
         }}>
-          <ShieldCheck size={22} color="#07090e" strokeWidth={2.5} />
+          <ShieldCheck size={22} color="#ffffff" strokeWidth={2.5} />
         </div>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -43,9 +43,9 @@ export const Header: React.FC<HeaderProps> = ({ datasetName, onReset }) => {
               fontWeight: 700,
               padding: '0.15rem 0.45rem',
               borderRadius: 4,
-              background: 'rgba(56, 189, 248, 0.15)',
-              color: '#38bdf8',
-              border: '1px solid rgba(56, 189, 248, 0.3)',
+              background: 'rgba(124, 58, 237, 0.08)',
+              color: '#7c3aed',
+              border: '1px solid rgba(124, 58, 237, 0.2)',
             }}>
               v1.0
             </span>
@@ -64,12 +64,12 @@ export const Header: React.FC<HeaderProps> = ({ datasetName, onReset }) => {
             gap: '0.4rem',
             padding: '0.35rem 0.85rem',
             borderRadius: 8,
-            background: 'rgba(255, 255, 255, 0.05)',
+            background: '#f1f5f9',
             border: '1px solid var(--border)',
             fontSize: '0.825rem',
             color: 'var(--text-muted)',
           }}>
-            <Database size={14} color="#38bdf8" />
+            <Database size={14} color="#7c3aed" />
             <span style={{ color: 'var(--text-main)', fontWeight: 600 }}>{datasetName}</span>
           </div>
         )}
