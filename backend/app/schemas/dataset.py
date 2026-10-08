@@ -19,6 +19,7 @@ class DatasetResponse(BaseModel):
     has_profile: bool = False
     has_health_score: bool = False
     has_cleaned_data: bool = False
+    warnings: List[str] = []
 
     class Config:
         from_attributes = True
@@ -136,9 +137,13 @@ class RecommendationItem(BaseModel):
     method: str
     reason_title: str
     explanation_text: str
+    explanation_source: Optional[str] = "statistical"
     severity: str
     is_destructive: bool
     is_approved: bool
+
+    class Config:
+        from_attributes = True
 
 
 class RecommendationApprovalRequest(BaseModel):
@@ -185,6 +190,7 @@ class ModelBenchmarkLeaderboardResponse(BaseModel):
     dataset_id: str
     problem_type: str
     primary_metric: str
+    cv_folds: int = 3
     models: List[ModelBenchmarkItem]
     best_model_summary: str
 
@@ -197,3 +203,13 @@ class FullDiagnosticResponse(BaseModel):
     health_score: HealthScoreResponse
     issues: List[IssueItem]
     recommendations: List[RecommendationItem]
+
+
+# --- Session Restore ---
+class DatasetSessionResponse(BaseModel):
+    dataset: DatasetResponse
+    sample: DatasetSampleResponse
+    objective: Optional[ObjectiveResponse] = None
+    diagnostics: Optional[FullDiagnosticResponse] = None
+    execution: Optional[ExecutionResponse] = None
+    leaderboard: Optional[ModelBenchmarkLeaderboardResponse] = None

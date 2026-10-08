@@ -2,8 +2,8 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'AegisMind | AI Data Readiness & Model Recommendation Platform',
-  description: 'Explainable Pre-ML Data Diagnosis, Cleaning & Model Recommendation System',
+  title: 'Nebulus — Messy data in. Model-ready out.',
+  description: 'Profile, score, explain and clean tabular data before it reaches your model. Reproducible pipelines and honest benchmarks.',
 };
 
 export default function RootLayout({

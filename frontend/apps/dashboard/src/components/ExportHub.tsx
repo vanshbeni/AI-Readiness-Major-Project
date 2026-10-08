@@ -1,131 +1,92 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { api } from '../services/api';
-import { Download, FileSpreadsheet, FileCode, FileText, Code2 } from 'lucide-react';
+import { ArrowDown, Loader2 } from 'lucide-react';
+import { Banner, Eyebrow, Panel, Reveal } from './ui';
 
 interface ExportHubProps {
   datasetId: string;
+  hasExecution: boolean;
+  hasBenchmarks: boolean;
 }
 
-export const ExportHub: React.FC<ExportHubProps> = ({ datasetId }) => {
+type ExportKind = 'cleaned-csv' | 'pipeline-script' | 'pdf-report' | 'manifest-json';
+
+const EXPORTS: {
+  kind: ExportKind;
+  ext: string;
+  title: string;
+  description: string;
+  fallbackName: string;
+  color: string;
+  requiresExecution: boolean;
+}[] = [
+  { kind: 'cleaned-csv', ext: '.csv', title: 'Cleaned dataset', description: 'Preprocessed, ML-ready CSV.', fallbackName: 'cleaned_dataset.csv', color: 'var(--accent)', requiresExecution: true },
+  { kind: 'pipeline-script', ext: '.py', title: 'Pipeline script', description: 'Standalone Python that reproduces the cleaned CSV.', fallbackName: 'pipeline.py', color: 'var(--good)', requiresExecution: true },
+  { kind: 'pdf-report', ext: '.pdf', title: 'Quality audit', description: 'Executive PDF diagnostic report.', fallbackName: 'data_readiness_report.pdf', color: 'var(--bad)', requiresExecution: false },
+  { kind: 'manifest-json', ext: '.json', title: 'JSON manifest', description: 'Machine-readable audit manifest.', fallbackName: 'manifest.json', color: 'var(--ink)', requiresExecution: false },
+];
+
+export const ExportHub: React.FC<ExportHubProps> = ({ datasetId, hasExecution, hasBenchmarks }) => {
+  const [busy, setBusy] = useState<ExportKind | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleDownload = async (kind: ExportKind, fallbackName: string) => {
+    setBusy(kind);
+    setError(null);
+    try {
+      await api.downloadExport(datasetId, kind, fallbackName);
+    } catch (err: any) {
+      setError(err.message || 'Download failed');
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
-    <div className="glass-panel" style={{ padding: '1.75rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-      <div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <Download size={20} color="#38bdf8" />
-          <h3 style={{ fontSize: '1.2rem', fontWeight: 800 }}>
-            Download & Export Hub
-          </h3>
+    <div style={{ marginTop: '1.5rem' }}>
+      <div className="step-head-row" style={{ marginBottom: '1.25rem' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.7rem' }}>
+          <Eyebrow label="export" />
+          <h2 style={{ fontSize: '1.8rem', letterSpacing: '-0.045em', fontWeight: 600, lineHeight: 1.05 }}>Take it home.</h2>
         </div>
-        <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-          Export production-ready artifacts, audited dataset files, and executive reports.
+        <p className="h-sub" style={{ fontSize: '0.86rem', maxWidth: 380 }}>
+          Audited files and reports, ready for your notebook, repo or report.
+          {!hasBenchmarks && ' Reports generated now will not include model benchmarks.'}
         </p>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
-        {/* Cleaned CSV */}
-        <a
-          href={api.getCleanedCsvUrl(datasetId)}
-          download
-          className="glass-panel"
-          style={{
-            padding: '1.25rem',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '0.6rem',
-            transition: 'all 0.2s ease',
-            border: '1px solid var(--border)',
-          }}
-        >
-          <div style={{ width: 36, height: 36, borderRadius: 8, background: 'rgba(56, 189, 248, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#38bdf8' }}>
-            <FileSpreadsheet size={18} />
-          </div>
-          <div>
-            <h4 style={{ fontSize: '0.95rem', fontWeight: 700 }}>Cleaned Dataset</h4>
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>Preprocessed, ML-ready CSV format</p>
-          </div>
-          <span style={{ fontSize: '0.8rem', color: '#38bdf8', fontWeight: 600, marginTop: 'auto', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-            <Download size={13} /> Download .CSV
-          </span>
-        </a>
+      {error && <Banner tone="error" onClose={() => setError(null)}>{error}</Banner>}
 
-        {/* Python Pipeline Script */}
-        <a
-          href={api.getPipelineScriptUrl(datasetId)}
-          download
-          className="glass-panel"
-          style={{
-            padding: '1.25rem',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '0.6rem',
-            transition: 'all 0.2s ease',
-            border: '1px solid var(--border)',
-          }}
-        >
-          <div style={{ width: 36, height: 36, borderRadius: 8, background: 'rgba(168, 85, 247, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#10b981' }}>
-            <FileCode size={18} />
-          </div>
-          <div>
-            <h4 style={{ fontSize: '0.95rem', fontWeight: 700 }}>Pipeline Script</h4>
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>Standalone Python & scikit-learn code</p>
-          </div>
-          <span style={{ fontSize: '0.8rem', color: '#10b981', fontWeight: 600, marginTop: 'auto', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-            <Download size={13} /> Download .PY
-          </span>
-        </a>
-
-        {/* PDF Audit Report */}
-        <a
-          href={api.getPdfReportUrl(datasetId)}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="glass-panel"
-          style={{
-            padding: '1.25rem',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '0.6rem',
-            transition: 'all 0.2s ease',
-            border: '1px solid var(--border)',
-          }}
-        >
-          <div style={{ width: 36, height: 36, borderRadius: 8, background: 'rgba(244, 63, 94, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#f43f5e' }}>
-            <FileText size={18} />
-          </div>
-          <div>
-            <h4 style={{ fontSize: '0.95rem', fontWeight: 700 }}>Data Quality Audit</h4>
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>Executive PDF diagnostic report</p>
-          </div>
-          <span style={{ fontSize: '0.8rem', color: '#fb7185', fontWeight: 600, marginTop: 'auto', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-            <Download size={13} /> Download .PDF
-          </span>
-        </a>
-
-        {/* JSON Manifest */}
-        <a
-          href={api.getManifestJsonUrl(datasetId)}
-          download
-          className="glass-panel"
-          style={{
-            padding: '1.25rem',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '0.6rem',
-            transition: 'all 0.2s ease',
-            border: '1px solid var(--border)',
-          }}
-        >
-          <div style={{ width: 36, height: 36, borderRadius: 8, background: 'rgba(168, 85, 247, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#a855f7' }}>
-            <Code2 size={18} />
-          </div>
-          <div>
-            <h4 style={{ fontSize: '0.95rem', fontWeight: 700 }}>JSON Manifest</h4>
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>Machine-readable audit manifest</p>
-          </div>
-          <span style={{ fontSize: '0.8rem', color: '#c084fc', fontWeight: 600, marginTop: 'auto', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-            <Download size={13} /> Download .JSON
-          </span>
-        </a>
+      <div className="export-grid">
+        {EXPORTS.map((item, i) => {
+          const locked = item.requiresExecution && !hasExecution;
+          const disabled = locked || busy !== null;
+          return (
+            <Reveal key={item.kind} delay={i * 80}>
+              <Panel
+                as="button"
+                type="button"
+                tilt
+                lift
+                className="export-tile"
+                onClick={() => handleDownload(item.kind, item.fallbackName)}
+                disabled={disabled}
+                title={locked ? 'Execute the cleaning pipeline first' : undefined}
+                style={{ width: '100%', height: '100%', opacity: locked ? 0.5 : 1 }}
+              >
+                <span className="ext" style={{ color: item.color }}>{item.ext}</span>
+                <span>
+                  <h4>{item.title}</h4>
+                  <p>{item.description}</p>
+                </span>
+                <span className="go">
+                  {busy === item.kind ? <Loader2 size={12} className="animate-spin" /> : <ArrowDown size={12} />}
+                  {locked ? 'run pipeline first' : busy === item.kind ? 'preparing…' : `download ${item.fallbackName}`}
+                </span>
+              </Panel>
+            </Reveal>
+          );
+        })}
       </div>
     </div>
   );

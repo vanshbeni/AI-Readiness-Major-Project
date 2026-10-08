@@ -35,6 +35,7 @@ class Dataset(Base):
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
     user_id = Column(String(36), ForeignKey("users.id"), nullable=True)
+    owner_token = Column(String(64), nullable=True, index=True)
     filename = Column(String(255), nullable=False)
     file_size_bytes = Column(Integer, default=0)
     raw_file_path = Column(String(512), nullable=False)
@@ -51,6 +52,21 @@ class Dataset(Base):
     recommendations = relationship("Recommendation", back_populates="dataset", cascade="all, delete-orphan")
     processing_jobs = relationship("ProcessingJob", back_populates="dataset", cascade="all, delete-orphan")
     benchmarks = relationship("ModelBenchmark", back_populates="dataset", cascade="all, delete-orphan")
+    snapshot = relationship("DatasetSnapshot", back_populates="dataset", uselist=False, cascade="all, delete-orphan")
+
+
+class DatasetSnapshot(Base):
+    """Last API payloads per stage, used to restore the UI session after a page refresh."""
+    __tablename__ = "dataset_snapshots"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    dataset_id = Column(String(36), ForeignKey("datasets.id"), nullable=False, unique=True)
+    diagnostics = Column(JSON, nullable=True)
+    execution = Column(JSON, nullable=True)
+    leaderboard = Column(JSON, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    dataset = relationship("Dataset", back_populates="snapshot")
 
 
 class Objective(Base):
@@ -115,6 +131,8 @@ class Recommendation(Base):
     method = Column(String(100), nullable=False)
     reason_title = Column(String(255), nullable=False)
     explanation_text = Column(Text, nullable=False)
+    explanation_source = Column(String(20), nullable=True)  # "ai" | "statistical"
+    params = Column(JSON, nullable=True)
     severity = Column(String(20), default="medium")
     is_destructive = Column(Boolean, default=False)
     is_approved = Column(Boolean, default=True)
@@ -133,6 +151,7 @@ class ProcessingJob(Base):
     pipeline_file_path = Column(String(512), nullable=True)
     script_file_path = Column(String(512), nullable=True)
     report_file_path = Column(String(512), nullable=True)
+    applied_steps = Column(JSON, nullable=True)
     started_at = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
 

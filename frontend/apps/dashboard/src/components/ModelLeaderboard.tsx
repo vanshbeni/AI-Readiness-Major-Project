@@ -1,135 +1,112 @@
 import React from 'react';
 import { BenchmarkLeaderboard } from '../services/api';
-import { Trophy, Zap, Clock } from 'lucide-react';
+import { Eyebrow, Note, Panel, Reveal, useInView } from './ui';
 
 interface ModelLeaderboardProps {
   leaderboard: BenchmarkLeaderboard;
 }
 
+const barWidth = (v: number) => `${Math.max(0, Math.min(1, v)) * 100}%`;
+
 export const ModelLeaderboard: React.FC<ModelLeaderboardProps> = ({ leaderboard }) => {
+  const [ref, inView] = useInView<HTMLDivElement>(0.1);
   const topModel = leaderboard.models[0];
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      {/* Top Model Recommendation Spotlight */}
-      {topModel && (
-        <div
-          className="glass-panel glow-cyan"
-          style={{
-            padding: '1.75rem',
-            background: 'linear-gradient(135deg, rgba(56, 189, 248, 0.12) 0%, rgba(139, 92, 246, 0.08) 100%)',
-            border: '1px solid rgba(56, 189, 248, 0.35)',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap',
-            gap: '1rem',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-            <div style={{
-              width: 50,
-              height: 50,
-              borderRadius: '50%',
-              background: 'linear-gradient(135deg, #38bdf8 0%, #3b82f6 100%)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: '0 0 15px rgba(56, 189, 248, 0.4)',
-            }}>
-              <Trophy size={26} color="#07090e" />
-            </div>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.2rem' }}>
-                <span className="badge badge-success">Top Candidate Recommendation</span>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>Rank #1</span>
-              </div>
-              <h3 style={{ fontSize: '1.4rem', fontWeight: 800 }}>
-                {topModel.model_name}
-              </h3>
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', maxWidth: 550 }}>
-                {topModel.description}
-              </p>
-            </div>
-          </div>
+  if (!topModel) {
+    return (
+      <Panel className="panel-pad">
+        <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>No candidate model could be trained on this dataset.</p>
+      </Panel>
+    );
+  }
 
-          <div style={{ textAlign: 'right' }}>
-            <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)', textTransform: 'uppercase', fontWeight: 700 }}>
-              Cross-Validated {leaderboard.primary_metric}
-            </span>
-            <div style={{ fontSize: '2rem', fontWeight: 800, color: '#38bdf8', lineHeight: 1.1 }}>
-              {topModel.metric_display}
+  return (
+    <div className="section-gap">
+      <Reveal>
+        <div className="dark-card">
+          <span className="blob a" />
+          <span className="blob b" />
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: '2rem', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem', maxWidth: 560 }}>
+              <Eyebrow label="winner" index="#1" />
+              <h2 style={{ fontSize: 'clamp(1.8rem, 3.6vw, 2.8rem)', letterSpacing: '-0.05em', fontWeight: 600, lineHeight: 1 }}>
+                {topModel.model_name}
+              </h2>
+              <p className="muted" style={{ fontSize: '0.9rem', lineHeight: 1.6 }}>{topModel.description}</p>
             </div>
-            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-              Fit latency: {topModel.training_time_sec}s
-            </span>
+            <div style={{ textAlign: 'right' }}>
+              <div className="mono muted" style={{ fontSize: '0.68rem', letterSpacing: '0.08em' }}>
+                {leaderboard.cv_folds}-FOLD CV · {leaderboard.primary_metric.toUpperCase()}
+              </div>
+              <div style={{ fontSize: 'clamp(2.8rem, 6vw, 4.4rem)', fontWeight: 600, letterSpacing: '-0.06em', lineHeight: 1 }}>
+                {topModel.metric_display}
+              </div>
+              <div className="mono muted" style={{ fontSize: '0.7rem', marginTop: '0.4rem' }}>
+                fit in {topModel.training_time_sec}s
+              </div>
+            </div>
           </div>
+          <p className="muted" style={{ marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px solid rgba(255,255,255,.12)', fontSize: '0.82rem', lineHeight: 1.6 }}>
+            {leaderboard.best_model_summary.replace(/\*\*/g, '')}
+          </p>
+        </div>
+      </Reveal>
+
+      <Reveal>
+        <Panel>
+          <div className="panel-head">
+            <div className="left">
+              <span className="dots"><i /><i /><i /></span>
+              <span>leaderboard · {leaderboard.problem_type}</span>
+            </div>
+            <span>scaling & rebalancing fitted per fold</span>
+          </div>
+          <div ref={ref} className={`table-wrap ${inView ? 'in' : ''}`}>
+            <table className="mono-table">
+              <thead>
+                <tr>
+                  <th style={{ width: 56 }}>rank</th>
+                  <th>model</th>
+                  <th>{leaderboard.primary_metric}</th>
+                  <th>fit time</th>
+                  <th>suitability</th>
+                </tr>
+              </thead>
+              <tbody>
+                {leaderboard.models.map((model, i) => {
+                  const best = model.rank === 1;
+                  return (
+                    <tr key={model.id} style={best ? { background: 'var(--accent-soft)' } : undefined}>
+                      <td style={{ color: best ? 'var(--accent)' : 'var(--dim)', fontWeight: 600 }}>#{model.rank}</td>
+                      <td style={{ color: 'var(--ink)', fontWeight: best ? 600 : 400 }}>
+                        {model.model_name}
+                        {best && <span className="chip accent" style={{ marginLeft: 8 }}>best</span>}
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                          <span style={{ minWidth: 52, fontWeight: 600, color: best ? 'var(--good)' : 'var(--ink-2)' }}>{model.metric_display}</span>
+                          <span className="lb-bar">
+                            <i style={{ ['--w' as string]: barWidth(model.metric_value), ['--d' as string]: `${i * 120}ms`, background: best ? 'var(--accent)' : undefined }} />
+                          </span>
+                        </div>
+                      </td>
+                      <td style={{ color: 'var(--muted)' }}>{model.training_time_sec}s</td>
+                      <td>
+                        <span className={`chip ${model.suitability === 'High' ? 'good' : ''}`}>{model.suitability.toLowerCase()}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      </Reveal>
+      {leaderboard.models.length > 1 && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '-0.75rem' }}>
+          <Note rot={-2} delay={0.3}>all scored on held-out folds, no peeking</Note>
         </div>
       )}
-
-      {/* Full Leaderboard Table */}
-      <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <Zap size={18} color="#f59e0b" />
-            <h4 style={{ fontSize: '1.1rem', fontWeight: 700 }}>
-              Model Candidate Leaderboard ({leaderboard.problem_type})
-            </h4>
-          </div>
-          <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>
-            Evaluated using 3-Fold Cross Validation on Cleaned Data
-          </span>
-        </div>
-
-        <div style={{ overflowX: 'auto', borderRadius: 8, border: '1px solid var(--border)' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem', textAlign: 'left' }}>
-            <thead>
-              <tr style={{ background: 'rgba(255, 255, 255, 0.04)', borderBottom: '1px solid var(--border)' }}>
-                <th style={{ padding: '0.75rem 0.85rem', fontWeight: 600, color: 'var(--text-muted)', width: 50 }}>Rank</th>
-                <th style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--text-muted)' }}>Algorithm</th>
-                <th style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--text-muted)' }}>{leaderboard.primary_metric}</th>
-                <th style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--text-muted)' }}>Fit Time</th>
-                <th style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--text-muted)' }}>Suitability</th>
-              </tr>
-            </thead>
-            <tbody>
-              {leaderboard.models.map((model) => (
-                <tr
-                  key={model.id}
-                  style={{
-                    borderBottom: '1px solid rgba(255, 255, 255, 0.04)',
-                    background: model.rank === 1 ? 'rgba(56, 189, 248, 0.05)' : 'transparent',
-                  }}
-                >
-                  <td style={{ padding: '0.75rem 0.85rem', fontWeight: 700, color: model.rank === 1 ? '#38bdf8' : 'var(--text-dim)' }}>
-                    #{model.rank}
-                  </td>
-                  <td style={{ padding: '0.75rem 1rem', fontWeight: 600 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                      <span style={{ color: model.rank === 1 ? '#38bdf8' : 'var(--text-main)' }}>{model.model_name}</span>
-                      {model.rank === 1 && <span className="badge badge-medium" style={{ fontSize: '0.65rem' }}>Best</span>}
-                    </div>
-                  </td>
-                  <td style={{ padding: '0.75rem 1rem', fontWeight: 700, color: model.rank === 1 ? '#34d399' : 'var(--text-main)', fontFamily: 'monospace' }}>
-                    {model.metric_display}
-                  </td>
-                  <td style={{ padding: '0.75rem 1rem', color: 'var(--text-dim)', fontSize: '0.8rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                      <Clock size={12} />
-                      <span>{model.training_time_sec}s</span>
-                    </div>
-                  </td>
-                  <td style={{ padding: '0.75rem 1rem' }}>
-                    <span className={`badge ${model.suitability === 'High' ? 'badge-success' : 'badge-low'}`}>
-                      {model.suitability}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
     </div>
   );
 };

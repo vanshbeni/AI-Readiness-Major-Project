@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'AegisMind | AI Data Readiness Dashboard',
+  title: 'Nebulus / dashboard',
   description: 'Explainable Pre-ML Data Diagnosis, Cleaning & Model Recommendation System',
 };
 

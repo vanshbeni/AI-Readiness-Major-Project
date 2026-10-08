@@ -1,177 +1,137 @@
-import os
 import uuid
-import pandas as pd
+
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+
+from app.api.deps import get_owned_dataset, get_snapshot, invalidate_execution
+from app.api.v1.endpoints.datasets import build_dataset_response
 from app.core.database import get_db
-from app.models.dataset import Dataset, Objective, ProfileReport, IssueDetection, HealthScore, Recommendation
+from app.core.storage import dataset_lock, json_safe, read_dataset
+from app.engine.detector import detect_issues
+from app.engine.explainer import explain_recommendations_with_gemini
+from app.engine.profiler import profile_dataset
+from app.engine.rules import select_remediation_methods
+from app.engine.scorer import calculate_health_score
+from app.models.dataset import Dataset, HealthScore, IssueDetection, Objective, ProfileReport, Recommendation
 from app.schemas.dataset import (
     FullDiagnosticResponse,
-    DatasetResponse,
-    ObjectiveResponse,
-    ProfileReportResponse,
     HealthScoreResponse,
     IssueItem,
+    ObjectiveResponse,
+    ProfileReportResponse,
     RecommendationItem,
 )
-from app.engine.profiler import profile_dataset
-from app.engine.detector import detect_issues
-from app.engine.scorer import calculate_health_score
-from app.engine.rules import select_remediation_methods
-from app.engine.explainer import explain_recommendations_with_gemini
 
 router = APIRouter()
 
 
 @router.post("/{dataset_id}/diagnose", response_model=FullDiagnosticResponse, status_code=status.HTTP_200_OK)
-async def run_diagnostics(
-    dataset_id: str,
+def run_diagnostics(
+    db_dataset: Dataset = Depends(get_owned_dataset),
     db: Session = Depends(get_db),
 ):
     """
-    Executes the full Pre-ML Data Quality Diagnostic Pipeline:
-    Profiling -> Issue Detection -> Health Score -> Stage 2 Rules -> Stage 3 Gemini Explainer.
+    Profiling -> Issue Detection -> Health Score -> Rule Matrix -> Explanations.
+    Requires an objective. Re-running clears previous recommendations and any executed pipeline results.
     """
-    db_dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
-    if not db_dataset:
-        raise HTTPException(status_code=404, detail="Dataset not found.")
-
-    if not os.path.exists(db_dataset.raw_file_path):
-        raise HTTPException(status_code=404, detail="Raw data file missing on server.")
-
-    # Load objective
+    dataset_id = db_dataset.id
     obj = db.query(Objective).filter(Objective.dataset_id == dataset_id).first()
-    target_col = obj.target_column if obj else None
-    prob_type = obj.problem_type if obj else "classification"
+    if not obj:
+        raise HTTPException(status_code=400, detail="Set the ML objective (target column and problem type) before running diagnostics.")
 
-    # Read dataset
-    ext = os.path.splitext(db_dataset.raw_file_path)[1].lower()
-    df = pd.read_csv(db_dataset.raw_file_path) if ext == ".csv" else pd.read_excel(db_dataset.raw_file_path)
+    with dataset_lock(dataset_id):
+        target_col, prob_type = obj.target_column, obj.problem_type
+        df = read_dataset(db_dataset.raw_file_path)
 
-    # 1. Profiling
-    summary_stats, col_profiles = profile_dataset(df, target_col=target_col)
-
-    # 2. Issue Detection
-    detected_issues = detect_issues(df, target_col=target_col, problem_type=prob_type)
-
-    # 3. Health Score (Before Stage)
-    comp_score, sub_scores, grade, summary_text, drivers = calculate_health_score(
-        summary_stats, col_profiles, detected_issues, problem_type=prob_type
-    )
-
-    # 4. Stage 2 Rule Matrix
-    raw_recommendations = select_remediation_methods(
-        detected_issues, col_profiles, problem_type=prob_type
-    )
-
-    # 5. Stage 3 Grounded LLM Explanation Layer
-    explained_recs = explain_recommendations_with_gemini(raw_recommendations)
-
-    # ---------------- Persist / Update in DB ----------------
-    # Clear old profiling and issues for clean re-runs
-    db.query(ProfileReport).filter(ProfileReport.dataset_id == dataset_id).delete()
-    db.query(IssueDetection).filter(IssueDetection.dataset_id == dataset_id).delete()
-    db.query(HealthScore).filter(HealthScore.dataset_id == dataset_id, HealthScore.stage == "before").delete()
-    db.query(Recommendation).filter(Recommendation.dataset_id == dataset_id).delete()
-
-    # Save Profile Report
-    profile_record = ProfileReport(
-        dataset_id=dataset_id,
-        column_profiles=col_profiles,
-        summary_stats=summary_stats,
-    )
-    db.add(profile_record)
-
-    # Save Issues
-    issue_items = []
-    for issue in detected_issues:
-        issue_id = str(uuid.uuid4())
-        db_issue = IssueDetection(
-            id=issue_id,
-            dataset_id=dataset_id,
-            issue_type=issue["issue_type"],
-            column=issue.get("column"),
-            severity=issue["severity"],
-            details=issue["details"],
+        summary_stats, col_profiles = profile_dataset(df, target_col=target_col)
+        detected_issues = detect_issues(df, target_col=target_col, problem_type=prob_type)
+        comp_score, sub_scores, grade, summary_text, drivers = calculate_health_score(
+            summary_stats, col_profiles, detected_issues, problem_type=prob_type
         )
-        db.add(db_issue)
-        issue_items.append(IssueItem(
-            id=issue_id,
-            issue_type=issue["issue_type"],
-            column=issue.get("column"),
-            severity=issue["severity"],
-            title=issue["title"],
-            details=issue["details"],
-        ))
+        raw_recommendations = select_remediation_methods(detected_issues, col_profiles, problem_type=prob_type)
+        explained_recs = explain_recommendations_with_gemini(raw_recommendations)
 
-    # Save Health Score
-    health_record = HealthScore(
-        dataset_id=dataset_id,
-        stage="before",
-        composite_score=comp_score,
-        sub_scores=sub_scores,
-        summary_text=summary_text,
-    )
-    db.add(health_record)
+        summary_stats = json_safe(summary_stats)
+        col_profiles = json_safe(col_profiles)
 
-    # Save Recommendations
-    rec_items = []
-    for rec in explained_recs:
-        rec_id = str(uuid.uuid4())
-        db_rec = Recommendation(
-            id=rec_id,
-            dataset_id=dataset_id,
-            issue_type=rec["issue_type"],
-            column=rec.get("column"),
-            method=rec["method"],
-            reason_title=rec["reason_title"],
-            explanation_text=rec["explanation_text"],
-            severity=rec["severity"],
-            is_destructive=rec["is_destructive"],
-            is_approved=rec["is_approved"],
-        )
-        db.add(db_rec)
-        rec_items.append(RecommendationItem(
-            id=rec_id,
-            issue_type=rec["issue_type"],
-            column=rec.get("column"),
-            method=rec["method"],
-            reason_title=rec["reason_title"],
-            explanation_text=rec["explanation_text"],
-            severity=rec["severity"],
-            is_destructive=rec["is_destructive"],
-            is_approved=rec["is_approved"],
-        ))
+        try:
+            db.query(ProfileReport).filter(ProfileReport.dataset_id == dataset_id).delete()
+            db.query(IssueDetection).filter(IssueDetection.dataset_id == dataset_id).delete()
+            db.query(HealthScore).filter(HealthScore.dataset_id == dataset_id, HealthScore.stage == "before").delete()
+            db.query(Recommendation).filter(Recommendation.dataset_id == dataset_id).delete()
+            invalidate_execution(db, db_dataset)
 
-    db.commit()
+            db.add(ProfileReport(dataset_id=dataset_id, column_profiles=col_profiles, summary_stats=summary_stats))
 
-    return FullDiagnosticResponse(
-        dataset=DatasetResponse(
-            id=db_dataset.id,
-            filename=db_dataset.filename,
-            file_size_bytes=db_dataset.file_size_bytes,
-            row_count=db_dataset.row_count,
-            col_count=db_dataset.col_count,
-            uploaded_at=db_dataset.uploaded_at,
-            has_objective=bool(obj),
-            has_profile=True,
-            has_health_score=True,
-            has_cleaned_data=bool(db_dataset.cleaned_file_path),
-        ),
-        objective=ObjectiveResponse.model_validate(obj) if obj else None,
-        profile=ProfileReportResponse(
-            dataset_id=dataset_id,
-            summary=summary_stats,
-            columns=col_profiles,
-        ),
-        health_score=HealthScoreResponse(
-            stage="before",
-            composite_score=comp_score,
-            grade=grade,
-            sub_scores=sub_scores,
-            summary_text=summary_text,
-            top_negative_drivers=drivers,
-        ),
-        issues=issue_items,
-        recommendations=rec_items,
-    )
+            issue_items = []
+            for issue in detected_issues:
+                issue_id = str(uuid.uuid4())
+                details = json_safe(issue["details"])
+                db.add(IssueDetection(
+                    id=issue_id, dataset_id=dataset_id, issue_type=issue["issue_type"],
+                    column=issue.get("column"), severity=issue["severity"], details=details,
+                ))
+                issue_items.append(IssueItem(
+                    id=issue_id, issue_type=issue["issue_type"], column=issue.get("column"),
+                    severity=issue["severity"], title=issue["title"], details=details,
+                ))
+
+            db.add(HealthScore(
+                dataset_id=dataset_id, stage="before", composite_score=comp_score,
+                sub_scores=sub_scores, summary_text=summary_text,
+            ))
+
+            rec_items = []
+            for rec in explained_recs:
+                rec_id = str(uuid.uuid4())
+                db.add(Recommendation(
+                    id=rec_id,
+                    dataset_id=dataset_id,
+                    issue_type=rec["issue_type"],
+                    column=rec.get("column"),
+                    method=rec["method"],
+                    reason_title=rec["reason_title"],
+                    explanation_text=rec["explanation_text"],
+                    explanation_source=rec.get("explanation_source", "statistical"),
+                    params=json_safe(rec.get("stats_context", {})),
+                    severity=rec["severity"],
+                    is_destructive=rec["is_destructive"],
+                    is_approved=rec["is_approved"],
+                ))
+                rec_items.append(RecommendationItem(
+                    id=rec_id,
+                    issue_type=rec["issue_type"],
+                    column=rec.get("column"),
+                    method=rec["method"],
+                    reason_title=rec["reason_title"],
+                    explanation_text=rec["explanation_text"],
+                    explanation_source=rec.get("explanation_source", "statistical"),
+                    severity=rec["severity"],
+                    is_destructive=rec["is_destructive"],
+                    is_approved=rec["is_approved"],
+                ))
+            db.flush()
+
+            response = FullDiagnosticResponse(
+                dataset=build_dataset_response(db, db_dataset),
+                objective=ObjectiveResponse.model_validate(obj),
+                profile=ProfileReportResponse(dataset_id=dataset_id, summary=summary_stats, columns=col_profiles),
+                health_score=HealthScoreResponse(
+                    stage="before",
+                    composite_score=comp_score,
+                    grade=grade,
+                    sub_scores=sub_scores,
+                    summary_text=summary_text,
+                    top_negative_drivers=drivers,
+                ),
+                issues=issue_items,
+                recommendations=rec_items,
+            )
+            get_snapshot(db, dataset_id).diagnostics = json_safe(response.model_dump(mode="json"))
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(status_code=409, detail="Diagnostics were updated concurrently. Please retry.")
+
+    return response

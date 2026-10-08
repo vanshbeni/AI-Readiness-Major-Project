@@ -1,7 +1,34 @@
 import re
+import warnings
 import numpy as np
 import pandas as pd
 from typing import Dict, Any, List, Tuple
+
+ID_TOKENS = {"id", "uuid", "guid", "pk", "index", "idx", "key", "code", "number", "no"}
+STRONG_ID_TOKENS = {"id", "uuid", "guid", "pk"}
+BOOLEAN_STRINGS = {"0", "1", "true", "false", "yes", "no", "y", "n", "t", "f"}
+DATE_NAME_TOKENS = {"date", "time", "timestamp", "datetime", "added", "created", "updated", "dob", "dt", "day", "month"}
+YEAR_NAME_TOKENS = {"year", "yr", "yyyy"}
+DATE_VALUE_PATTERN = re.compile(
+    r"\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}"
+    r"|\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b",
+    re.IGNORECASE,
+)
+
+
+def name_tokens(col_name: str) -> List[str]:
+    """Splits a column name into lowercase word tokens (snake_case, kebab-case, camelCase, spaces)."""
+    spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", str(col_name))
+    spaced = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", spaced)
+    return [t for t in re.split(r"[^A-Za-z0-9]+", spaced.lower()) if t]
+
+
+def _singular(token: str) -> str:
+    return token[:-1] if len(token) > 3 and token.endswith("s") else token
+
+
+def name_has_token(col_name: str, keywords) -> bool:
+    return any(_singular(t) in keywords or t in keywords for t in name_tokens(col_name))
 
 
 def infer_column_type(series: pd.Series, col_name: str) -> str:
@@ -23,23 +50,34 @@ def infer_column_type(series: pd.Series, col_name: str) -> str:
         return "text"
 
     col_lower = col_name.lower()
+    tokens = name_tokens(col_name)
+    n_unique = clean_series.nunique()
+    all_unique = n_unique == len(clean_series) and len(clean_series) > 1
 
-    # 1. Unique ID column
-    if any(k in col_lower for k in ["id", "uuid", "guid", "index", "pk"]) and clean_series.nunique() == len(clean_series):
-        return "id"
+    # 1. Unique ID column (by name token, or an integer 1..N style sequence)
+    if all_unique:
+        if any(t in STRONG_ID_TOKENS for t in tokens) or (tokens and tokens[-1] in ID_TOKENS):
+            return "id"
+        if pd.api.types.is_integer_dtype(series) and len(clean_series) > 20:
+            sorted_vals = np.sort(clean_series.to_numpy())
+            if np.all(np.diff(sorted_vals) == 1):
+                return "id"
 
     # 2. Boolean
-    if series.dtype == bool or set(clean_series.unique()).issubset({0, 1, "0", "1", "true", "false", "True", "False", "yes", "no"}):
-        if clean_series.nunique() <= 2:
+    if series.dtype == bool:
+        return "boolean"
+    if n_unique <= 2:
+        normalized = {str(v).strip().lower() for v in clean_series.unique()}
+        normalized = {"1" if v == "1.0" else "0" if v == "0.0" else v for v in normalized}
+        if normalized.issubset(BOOLEAN_STRINGS):
             return "boolean"
 
-    # 3. Year Range Check (e.g. release_year, birth_year)
-    if pd.api.types.is_numeric_dtype(series) or "year" in col_lower:
+    # 3. Year columns (requires a year-like column name, e.g. release_year, YearBuilt)
+    if "year" in col_lower or any(t in YEAR_NAME_TOKENS for t in tokens):
         num_clean = pd.to_numeric(clean_series, errors="coerce").dropna()
-        if not num_clean.empty and len(num_clean) > 5:
-            min_val = num_clean.min()
-            max_val = num_clean.max()
-            if 1800 <= min_val <= 2050 and 1800 <= max_val <= 2050 and (max_val - min_val) < 150:
+        if len(num_clean) > 5 and len(num_clean) >= 0.9 * len(clean_series):
+            min_val, max_val = num_clean.min(), num_clean.max()
+            if 1800 <= min_val <= 2100 and 1800 <= max_val <= 2100:
                 return "year_range"
 
     # 4. Standard Numeric
@@ -56,9 +94,9 @@ def infer_column_type(series: pd.Series, col_name: str) -> str:
     sample_strs = clean_series.astype(str).head(60).tolist()
 
     # 6. Check if Chronological Date String (e.g. "January 1, 2020", "2019-11-01", "01/05/2021")
-    if any(k in col_lower for k in ["date", "added", "created", "timestamp", "time", "dob"]) or len(sample_strs) > 5:
+    date_like_ratio = sum(bool(DATE_VALUE_PATTERN.search(s)) for s in sample_strs) / max(len(sample_strs), 1)
+    if date_like_ratio >= 0.8 or (any(t in DATE_NAME_TOKENS for t in tokens) and date_like_ratio >= 0.5):
         try:
-            import warnings
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 parsed = pd.to_datetime(sample_strs, format="mixed", errors="coerce")
@@ -75,14 +113,16 @@ def infer_column_type(series: pd.Series, col_name: str) -> str:
 
     # 8. Check if Delimited Multi-Label List (e.g. "Action, Drama, Thriller" or "Tom Hanks, Tim Allen")
     delimiters_found = sum(bool(',' in s or ';' in s or '|' in s) for s in sample_strs)
-    if len(sample_strs) > 0 and (delimiters_found / len(sample_strs)) >= 0.40 and any(k in col_lower for k in ["cast", "genre", "listed_in", "tags", "categories", "keywords", "actors"]):
+    multilabel_names = {"cast", "genre", "listed", "tag", "categorie", "category", "keyword", "actor", "skill", "label"}
+    if len(sample_strs) > 0 and (delimiters_found / len(sample_strs)) >= 0.40 and name_has_token(col_name, multilabel_names):
         return "multilabel_text"
 
     # 9. Check if Person Name / Entity Free-Text (e.g. Director, Author, Title, City)
-    unique_count = clean_series.nunique()
+    unique_count = n_unique
     unique_ratio = unique_count / len(clean_series) if len(clean_series) > 0 else 1.0
 
-    if any(k in col_lower for k in ["director", "actor", "author", "artist", "creator", "writer", "name", "title", "user", "person"]):
+    person_names = {"director", "actor", "author", "artist", "creator", "writer", "name", "title", "user", "person", "username"}
+    if name_has_token(col_name, person_names):
         if unique_count > 15:
             return "person_name_or_text"
 
@@ -91,6 +131,23 @@ def infer_column_type(series: pd.Series, col_name: str) -> str:
         return "categorical"
 
     return "text"
+
+
+def identifier_columns(df: pd.DataFrame) -> List[str]:
+    return [str(c) for c in df.columns if infer_column_type(df[c], str(c)) == "id"]
+
+
+def duplicate_subset(df: pd.DataFrame) -> List[str]:
+    """Columns used for duplicate detection: everything except unique identifiers."""
+    ids = set(identifier_columns(df))
+    subset = [str(c) for c in df.columns if str(c) not in ids]
+    return subset or [str(c) for c in df.columns]
+
+
+def count_duplicate_records(df: pd.DataFrame) -> int:
+    if df.empty:
+        return 0
+    return int(df.duplicated(subset=duplicate_subset(df)).sum())
 
 
 def profile_dataset(df: pd.DataFrame, target_col: str = None) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
@@ -103,9 +160,9 @@ def profile_dataset(df: pd.DataFrame, target_col: str = None) -> Tuple[Dict[str,
     total_missing = int(df.isna().sum().sum())
     overall_missing_pct = round((total_missing / total_cells * 100), 2) if total_cells > 0 else 0.0
     
-    duplicate_rows = int(df.duplicated().sum())
+    duplicate_rows = count_duplicate_records(df)
     duplicate_pct = round((duplicate_rows / total_rows * 100), 2) if total_rows > 0 else 0.0
-    
+
     memory_mb = round(df.memory_usage(deep=True).sum() / (1024 * 1024), 2)
 
     type_counts = {

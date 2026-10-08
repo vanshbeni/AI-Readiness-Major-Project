@@ -1,4 +1,4 @@
-# 🖥️ AegisMind Frontend Monorepo (Turborepo)
+# 🖥️ Nebulus Frontend Monorepo (Turborepo)
 
 A Turborepo-powered monorepo containing the client applications for the **AI Data Readiness & Model Recommendation Platform**:
 
@@ -15,15 +15,15 @@ frontend/
 ├── package.json               # Root workspace manifest & Turborepo scripts
 ├── apps/
 │   ├── dashboard/             # Complete pre-ML diagnostic dashboard
-│   │   ├── package.json       # @aegismind/dashboard
+│   │   ├── package.json       # @nebulus/dashboard
 │   │   ├── next.config.js
 │   │   ├── tsconfig.json
 │   │   └── src/
 │   │       ├── app/
 │   │       ├── components/    # 10 modular UI components
 │   │       └── services/      # FastAPI client
-│   └── landing/               # AegisMind modern landing page template
-│       ├── package.json       # @aegismind/landing
+│   └── landing/               # Nebulus modern landing page template
+│       ├── package.json       # @nebulus/landing
 │       ├── next.config.js
 │       ├── tsconfig.json
 │       └── src/

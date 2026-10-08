@@ -1,10 +1,41 @@
 import React, { useState, useRef } from 'react';
-import { UploadCloud, FileSpreadsheet, Sparkles, ArrowRight, Loader2 } from 'lucide-react';
-import { api, DatasetSummary, DatasetSample } from '../services/api';
+import { ArrowUpRight, Loader2, UploadCloud } from 'lucide-react';
+import { api, DatasetSummary, DatasetSample, MAX_UPLOAD_MB, SUPPORTED_EXTENSIONS } from '../services/api';
+import { Banner, Eyebrow, Note, Panel, Reveal, Scramble, Underlined, trackPointer } from './ui';
 
 interface UploadStepProps {
   onDatasetLoaded: (dataset: DatasetSummary, sample: DatasetSample) => void;
 }
+
+const DEMOS = [
+  {
+    key: 'titanic',
+    file: 'titanic.csv',
+    tag: 'classification',
+    tone: 'accent',
+    title: 'Titanic passenger survival',
+    body: 'Missing age and cabin, invalid negative ages, fare outliers, duplicates, ID and name columns.',
+    chips: ['nulls', 'outliers', 'dupes'],
+  },
+  {
+    key: 'churn',
+    file: 'churn.csv',
+    tag: 'imbalance',
+    tone: 'warn',
+    title: 'Telco customer churn',
+    body: 'Roughly 89:11 class imbalance, missing charges, collinear billing features.',
+    chips: ['imbalance', 'collinear', 'nulls'],
+  },
+  {
+    key: 'housing',
+    file: 'housing.csv',
+    tag: 'regression',
+    tone: 'good',
+    title: 'California housing prices',
+    body: 'Continuous target, collinear room features, outliers, duplicate records.',
+    chips: ['skew', 'collinear', 'dupes'],
+  },
+] as const;
 
 export const UploadStep: React.FC<UploadStepProps> = ({ onDatasetLoaded }) => {
   const [isDragging, setIsDragging] = useState(false);
@@ -12,9 +43,23 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onDatasetLoaded }) => {
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const validateFile = (file: File): string | null => {
+    const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
+    if (!SUPPORTED_EXTENSIONS.includes(ext)) return `Unsupported file type '${ext}'. Upload a CSV, XLSX or XLS file.`;
+    if (file.size === 0) return 'The selected file is empty.';
+    if (file.size > MAX_UPLOAD_MB * 1024 * 1024) return `File is larger than the ${MAX_UPLOAD_MB} MB limit.`;
+    return null;
+  };
+
   const handleFileUpload = async (file: File) => {
+    if (loading) return;
+    const validationError = validateFile(file);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
     try {
-      setLoading('Uploading & parsing dataset...');
+      setLoading(`uploading & parsing ${file.name}`);
       setError(null);
       const dataset = await api.uploadDataset(file);
       const sample = await api.getSample(dataset.id);
@@ -27,8 +72,9 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onDatasetLoaded }) => {
   };
 
   const handleDemoLoad = async (demoKey: string) => {
+    if (loading) return;
     try {
-      setLoading(`Loading ${demoKey} demo dataset...`);
+      setLoading(`loading ${demoKey} demo dataset`);
       setError(null);
       const dataset = await api.loadDemoDataset(demoKey);
       const sample = await api.getSample(dataset.id);
@@ -41,164 +87,111 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onDatasetLoaded }) => {
   };
 
   return (
-    <div style={{ maxWidth: 850, margin: '1rem auto', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-      <div style={{ textAlign: 'center' }}>
-        <h2 style={{ fontSize: '2rem', fontWeight: 800, marginBottom: '0.5rem' }}>
-          Upload Your <span className="gradient-text">Tabular Dataset</span>
-        </h2>
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem' }}>
-          Upload any CSV or Excel file to profile quality defects, calculate Health Score, and generate AI remediation fixes.
+    <div className="step-enter" style={{ maxWidth: 920, margin: '0 auto' }}>
+      <div className="step-head center" style={{ marginTop: '3.5rem' }}>
+        <Eyebrow label="ingest" index="01/05" caret />
+        <h1 className="h-title">
+          <Scramble text="Drop a messy" /> <Underlined>dataset.</Underlined>
+        </h1>
+        <p className="h-sub">
+          CSV or Excel. We profile every column, score its health out of 100 and draft fixes you approve one by one.
         </p>
       </div>
 
-      {error && (
-        <div style={{
-          padding: '0.85rem 1.25rem',
-          borderRadius: 10,
-          background: 'rgba(244, 63, 94, 0.06)',
-          border: '1px solid rgba(244, 63, 94, 0.2)',
-          color: '#e11d48',
-          fontSize: '0.875rem',
-        }}>
-          {error}
-        </div>
-      )}
+      {error && <Banner tone="error" onClose={() => setError(null)}>{error}</Banner>}
 
-      {/* Main Drag and Drop Area */}
-      <div
-        className="glass-panel"
-        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-        onDragLeave={() => setIsDragging(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setIsDragging(false);
-          if (e.dataTransfer.files?.[0]) handleFileUpload(e.dataTransfer.files[0]);
-        }}
-        onClick={() => fileInputRef.current?.click()}
-        style={{
-          padding: '3.5rem 2rem',
-          textAlign: 'center',
-          cursor: 'pointer',
-          borderColor: isDragging ? '#7c3aed' : 'var(--border)',
-          background: isDragging ? 'rgba(124, 58, 237, 0.03)' : 'var(--bg-card)',
-          transition: 'all 0.2s ease',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          gap: '1rem',
-        }}
-      >
-        <input
-          type="file"
-          ref={fileInputRef}
-          accept=".csv,.xlsx,.xls"
-          style={{ display: 'none' }}
-          onChange={(e) => {
-            if (e.target.files?.[0]) handleFileUpload(e.target.files[0]);
+      <div style={{ position: 'relative' }}>
+        <div
+          className={`dropzone ${isDragging ? 'dragging' : ''} ${loading ? 'loading' : ''}`}
+          role="button"
+          tabIndex={0}
+          aria-label="Upload a CSV or Excel file"
+          onPointerMove={trackPointer}
+          onKeyDown={(e) => {
+            if ((e.key === 'Enter' || e.key === ' ') && !loading) {
+              e.preventDefault();
+              fileInputRef.current?.click();
+            }
           }}
-        />
+          onDragOver={(e) => { e.preventDefault(); if (!loading) setIsDragging(true); }}
+          onDragLeave={() => setIsDragging(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setIsDragging(false);
+            if (e.dataTransfer.files?.[0]) handleFileUpload(e.dataTransfer.files[0]);
+          }}
+          onClick={() => !loading && fileInputRef.current?.click()}
+        >
+          <svg className="border" aria-hidden>
+            <rect x="1" y="1" rx="15" ry="15" style={{ width: 'calc(100% - 2px)', height: 'calc(100% - 2px)' }} />
+          </svg>
+          {loading && <span className="drop-scan" aria-hidden />}
 
-        <div style={{
-          width: 64,
-          height: 64,
-          borderRadius: '50%',
-          background: 'rgba(124, 58, 237, 0.06)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: '#7c3aed',
-        }}>
-          {loading ? <Loader2 size={32} className="animate-spin" /> : <UploadCloud size={32} />}
+          <input
+            type="file"
+            ref={fileInputRef}
+            accept=".csv,.xlsx,.xls"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = '';
+              if (file) handleFileUpload(file);
+            }}
+          />
+
+          <div className="drop-icon">
+            {loading ? <Loader2 size={28} className="animate-spin" /> : <UploadCloud size={28} />}
+          </div>
+
+          <p style={{ fontSize: '1.2rem', fontWeight: 600, letterSpacing: '-0.03em', marginBottom: '0.4rem' }}>
+            {loading ? <span className="mono" style={{ fontSize: '0.95rem' }}>{loading}<span className="caret" style={{ marginLeft: 4 }} /></span>
+              : isDragging ? 'Let go, we got it.' : 'Drag & drop your file here'}
+          </p>
+          <p className="mono" style={{ fontSize: '0.72rem', color: 'var(--muted)', marginBottom: '1.4rem' }}>
+            .csv · .xlsx · .xls &nbsp;/&nbsp; up to {MAX_UPLOAD_MB} MB &nbsp;/&nbsp; delimiter, encoding & types auto-detected
+          </p>
+
+          <span className="btn btn-dark" aria-hidden style={{ pointerEvents: 'none', opacity: loading ? 0.45 : 1 }}>
+            Browse files <ArrowUpRight size={15} className="arrow" />
+          </span>
         </div>
 
-        <div>
-          <p style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '0.35rem' }}>
-            {loading ? loading : 'Drag & drop your CSV or Excel file here'}
-          </p>
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-dim)' }}>
-            Supports CSV, XLSX up to 200 MB with automatic data type inference
-          </p>
-        </div>
-
-        <button className="btn-primary" disabled={!!loading} style={{ pointerEvents: 'none' }}>
-          <FileSpreadsheet size={16} />
-          <span>Browse File</span>
-        </button>
+        <Note className="float-note" tone="purple" arrow="left" rot={-7} delay={1.2} style={{ position: 'absolute', right: '-2.5rem', top: '-1.6rem' }}>
+          your file stays yours
+        </Note>
       </div>
 
-      {/* Quick Curated Demo Datasets */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 600 }}>
-          <Sparkles size={16} color="#7c3aed" />
-          <span>Or test with a pre-configured capstone benchmark dataset:</span>
+      <div style={{ marginTop: '3.5rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem', gap: '1rem', flexWrap: 'wrap' }}>
+          <Eyebrow label="or try a demo" />
+          <Note rot={3} delay={1.5}>pre-broken on purpose</Note>
         </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1rem' }}>
-          <div
-            className="glass-panel"
-            onClick={() => !loading && handleDemoLoad('titanic')}
-            style={{
-              padding: '1.25rem',
-              cursor: 'pointer',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '0.5rem',
-              transition: 'all 0.2s ease',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span className="badge badge-medium">Classification</span>
-              <ArrowRight size={14} color="var(--text-dim)" />
-            </div>
-            <h4 style={{ fontSize: '1rem', fontWeight: 700 }}>Titanic Passenger Survival</h4>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>
-              100 rows • Missing age/cabin, negative values, fare outliers, categorical encoding.
-            </p>
-          </div>
-
-          <div
-            className="glass-panel"
-            onClick={() => !loading && handleDemoLoad('churn')}
-            style={{
-              padding: '1.25rem',
-              cursor: 'pointer',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '0.5rem',
-              transition: 'all 0.2s ease',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span className="badge badge-high">Imbalance</span>
-              <ArrowRight size={14} color="var(--text-dim)" />
-            </div>
-            <h4 style={{ fontSize: '1rem', fontWeight: 700 }}>Telco Customer Churn</h4>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>
-              100 rows • Class imbalance ratio (80:20), missing charges, categoricals.
-            </p>
-          </div>
-
-          <div
-            className="glass-panel"
-            onClick={() => !loading && handleDemoLoad('housing')}
-            style={{
-              padding: '1.25rem',
-              cursor: 'pointer',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '0.5rem',
-              transition: 'all 0.2s ease',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span className="badge badge-success">Regression</span>
-              <ArrowRight size={14} color="var(--text-dim)" />
-            </div>
-            <h4 style={{ fontSize: '1rem', fontWeight: 700 }}>California Housing Prices</h4>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>
-              100 rows • Continuous target, multi-feature collinearity, non-normal skew.
-            </p>
-          </div>
+        <div className="demo-grid">
+          {DEMOS.map((d, i) => (
+            <Reveal key={d.key} delay={i * 90}>
+              <Panel
+                as="button"
+                type="button"
+                tilt
+                lift
+                className="demo-tile"
+                disabled={!!loading}
+                onClick={() => !loading && handleDemoLoad(d.key)}
+                style={{ width: '100%', height: '100%' }}
+              >
+                <span className="go">
+                  <span>~/{d.file}</span>
+                  <ArrowUpRight size={14} />
+                </span>
+                <span className={`chip ${d.tone}`} style={{ alignSelf: 'flex-start' }}>{d.tag}</span>
+                <h4>{d.title}</h4>
+                <p>~300 rows · {d.body}</p>
+                <span className="chips">
+                  {d.chips.map((c) => <span key={c} className="chip">{c}</span>)}
+                </span>
+              </Panel>
+            </Reveal>
+          ))}
         </div>
       </div>
     </div>

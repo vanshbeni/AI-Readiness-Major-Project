@@ -1,363 +1,389 @@
-# 🛡️ AI Data Readiness Platform 
+# 🛡️ AI Data Readiness Platform (AegisMind Engine)
 
-> **An Explainable Pre-ML Data Diagnosis, Cleaning & Model Recommendation System**  
-> *Closing the critical gap between messy raw data and robust machine learning pipelines.*
-
----
-
-## 📌 Executive Summary
-
-Most modern AutoML frameworks answer the question: **"Which model should I train?"**  
-**AI Data Readiness Platform** answers the fundamental question that must come first:  
-👉 **"Is my data ready for machine learning, and what exact steps are required to make it ready?"**
-
-Raw tabular data is plagued by missing values, duplicates, statistical outliers, encoding errors, class imbalance, and multicollinear features. Beginners and intermediate practitioners frequently train models directly on substandard data, leading to garbage-in/garbage-out results, overfitting, or silent model failures.
-
-This platform operates as an **intelligent, explainable diagnostic and remediation gateway**. It profiles raw datasets, computes a transparent **0–100 Data Health Score**, provides **AI-powered plain-language justifications** for recommended fixes, executes only **user-approved transformations**, quantifies before-vs-after improvements, and benchmarks the best candidate ML models.
+> **An Explainable Pre-Machine Learning Diagnostic, Automated Remediation & Model Benchmarking Platform**  
+> *Bridging the critical gap between raw, messy data and robust, production-grade machine learning models.*
 
 ---
 
-## 🎯 Core Differentiators
+## 📑 Table of Contents
 
-- **100% Explainable & Grounded:** Every remediation recommendation is grounded in deterministic statistics with natural-language reasoning (no black-box hallucinations).
-- **Human-in-the-Loop Control:** Zero destructive data edits without explicit user approval. Users toggle individual recommendations via an interactive checklist.
-- **Reproducible Artifacts:** Exports production-ready scikit-learn preprocessing pipelines (`.joblib`/Python scripts), cleaned CSVs, and executive PDF audit reports.
-- **Safe-Order Transformation Engine:** Applies data cleaning steps in a mathematically sound sequence (deduplication $\rightarrow$ imputation $\rightarrow$ encoding $\rightarrow$ outlier handling $\rightarrow$ scaling $\rightarrow$ resampling $\rightarrow$ feature selection).
-
----
-
-## 🚀 Feature Matrix: v1 (MVP) vs. v2 (Roadmap)
-
-| Feature Area | 🌟 Version 1.0 (Current Scope) | 🔮 Version 2.0+ (Future Roadmap) |
-| :--- | :--- | :--- |
-| **Data Ingestion** | • Tabular CSV and Excel (`.xlsx`) up to 200 MB<br>• Automated dtype inference (numeric, categorical, datetime, text, boolean, ID-like)<br>• Secure persistence via AWS S3 / MinIO & PostgreSQL | • Unstructured data (images, audio, free text corpora)<br>• Cloud database connectors (Snowflake, BigQuery, PostgreSQL)<br>• Streaming / real-time ingestion (Kafka / Webhooks) |
-| **ML Problem Types** | • Supervised Tabular Learning: Binary Classification, Multi-class Classification, Regression | • Time-series forecasting (seasonality, stationarity, temporal leakage checks)<br>• Unsupervised clustering & anomaly detection |
-| **Data Profiling & Quality Audit** | • Missingness per column and dataset-wide<br>• Cardinality & unique count analysis<br>• Distribution metrics (skewness, kurtosis, IQR, variance)<br>• Exact duplicate row detection | • Fuzzy duplicate detection & entity resolution<br>• Semantic drift & distribution shift detection<br>• PII (Personally Identifiable Information) redaction |
-| **Issue Detection Suite** | • Statistical outliers (IQR bounds & Z-score)<br>• Domain validity heuristics (e.g., negative age/salary)<br>• Class imbalance ratio detection (configurable thresholds)<br>• High-correlation / multicollinearity & redundant feature flags | • Advanced label noise detection (Confident Learning)<br>• Automated feature interaction / leakage detection |
-| **Data Health Score** | • 0–100 composite Health Score<br>• Weighted sub-scores: Missingness, Duplication, Outliers, Validity, Balance, Feature Quality<br>• Top issue drivers summary | • Industry/domain-specific scoring weights (Healthcare, Finance, eCommerce)<br>• Historical score tracking across dataset versions |
-| **Recommendation Engine** | • 3-Stage Hybrid Decision Pipeline (Deterministic Stats $\rightarrow$ Rule-based selection $\rightarrow$ LLM explanation)<br>• Safe default pre-checks (destructive fixes unchecked)<br>• Template fallback if LLM API is unavailable | • Meta-learned method selection (meta-model trained on OpenML dataset characteristics)<br>• Multi-strategy simulation & comparison |
-| **Preprocessing & Transformation** | • Fixed safe-order execution pipeline<br>• Configurable strategies (Mean/Median/KNN imputation, One-Hot/Target encoding, Robust/Standard scaling, SMOTE/Class-weights)<br>• Full reproducibility | • Automated custom feature engineering generation<br>• GPU-accelerated cuML / Polars pipeline execution |
-| **Before / After Evaluation** | • Side-by-side diagnostic metric comparison<br>• Health Score delta ($\Delta$) computation<br>• Executive plain-language summary of improvements | • Data distribution overlay charts (KDE / histograms)<br>• Feature drift & data leakage validation |
-| **Model Recommendation** | • Fast multi-model benchmarking (Scikit-learn, XGBoost, LightGBM, CatBoost)<br>• Ranked leaderboard (F1, ROC-AUC, RMSE, R²)<br>• Expected performance tier estimation | • One-click automated hyperparameter tuning (Optuna)<br>• Model export to ONNX / TorchScript / BentoML<br>• One-click cloud deployment endpoint |
-| **Export & Reporting** | • Cleaned dataset download (CSV)<br>• Serialized preprocessing pipeline (`.joblib` / Python code)<br>• Executive Data Quality Audit Report (PDF via ReportLab/WeasyPrint)<br>• Model recommendation manifest (JSON) | • Team workspace sharing & role-based access control (RBAC)<br>• Direct push to HuggingFace Datasets / DVC / MLflow |
+1. [Executive Overview](#-executive-overview)
+2. [End-to-End System Architecture & Execution Lifecycle](#-end-to-end-system-architecture--execution-lifecycle)
+3. [Mathematical Foundations & 0–100 Data Health Score](#-mathematical-foundations--0100-data-health-score)
+4. [Diagnostic & Quality Detection Suite](#-diagnostic--quality-detection-suite)
+5. [3-Stage Explainable AI Recommendation Engine](#-3-stage-explainable-ai-recommendation-engine)
+6. [Safe-Order 12-Step Transformation Execution Engine](#-safe-order-12-step-transformation-execution-engine)
+7. [Cross-Validation & Model Benchmarking Engine](#-cross-validation--model-benchmarking-engine)
+8. [Export Hub & Reproducible Artifact Generation](#-export-hub--reproducible-artifact-generation)
+9. [Project Directory & File Structure](#-project-directory--file-structure)
+10. [REST API Data Contracts & Endpoint Reference](#-rest-api-data-contracts--endpoint-reference)
+11. [Installation & Local Setup Guide](#-installation--local-setup-guide)
 
 ---
 
-## 🏗️ System Architecture
+## 📌 Executive Overview
+
+Most modern AutoML frameworks attempt to solve: **"Which algorithm or hyperparameter configuration gives the highest test accuracy?"**
+
+However, in real-world data science, **garbage in equals garbage out**. Real datasets suffer from missingness, exact duplicate rows, extreme outliers, unparsed datetime strings, mixed measurement units, severe class imbalance, high-cardinality IDs, and multicollinearity. 
+
+The **AI Data Readiness Platform** solves the prerequisite question:  
+👉 **"Is this dataset statistically viable for machine learning, what specific defects exist, why do they matter, and how can we safely transform it?"**
+
+### Core Principles
+* **100% Explainable & Grounded:** Every recommendation is computed with statistical heuristics and justified using LLM explanations (Gemini / OpenAI) with deterministic fallback templates.
+* **Human-in-the-Loop Governance:** Destructive operations (dropping columns, dropping rows) are never executed without explicit user opt-in.
+* **Mathematical Sequence Integrity:** Transformations run in a mathematically safe order to avoid data leakage and distorted statistics.
+* **Full Pipeline Reproducibility:** Generates standalone Python/Scikit-Learn pipeline scripts, executive PDF audit reports, and model-ready cleaned CSVs.
+
+---
+
+## 🏗️ End-to-End System Architecture & Execution Lifecycle
 
 ```mermaid
 flowchart TD
-    subgraph ClientLayer["🖥️ Frontend Layer (Next.js & TypeScript)"]
-        UI_Upload["Dataset Ingestion & Objective Form"]
-        UI_Dash["Health Score & Profiling Dashboard"]
-        UI_Checklist["Explainable Recommendation Checklist"]
-        UI_Compare["Before / After Quality Diff & Benchmarks"]
-        UI_Export["Artifact Download Hub"]
-    end
-
-    subgraph APILayer["⚡ API & Orchestration (FastAPI Python 3.11)"]
-        API_Auth["JWT Auth Service"]
-        API_Orch["Job Orchestrator & Task Dispatcher"]
-        API_Router["REST Endpoints (/profile, /recommend, /execute, /benchmark)"]
-    end
-
-    subgraph CoreEngine["⚙️ AI & Analytics Engine"]
-        Engine_Prof["Profiling & Stats Engine (pandas, numpy, scipy)"]
-        Engine_Detect["Issue Detector (IQR, Z-Score, Imbalance, Correlation)"]
-        Engine_Score["Health Score Calculator (Composite & Sub-scores)"]
-        
-        subgraph AIDecision["3-Stage Explainability Pipeline"]
-            Stage1["Stage 1: Statistical Extraction"]
-            Stage2["Stage 2: Deterministic Rule Matrix"]
-            Stage3["Stage 3: Grounded LLM Justification Layer (Claude / GPT)"]
-            Stage1 --> Stage2 --> Stage3
-        end
-
-        Engine_Pipe["Preprocessing Executor (scikit-learn Safe-Order Pipeline)"]
-        Engine_Bench["Model Benchmarking Pool (XGBoost, LightGBM, CatBoost, Sklearn)"]
-    end
-
-    subgraph DataStorage["🗄️ Storage & Queue Layer"]
-        DB_Postgres[("PostgreSQL\nUsers, Metadata, Jobs, Scores")]
-        S3_Store[("AWS S3 / MinIO\nRaw & Cleaned CSVs, Joblib, PDFs")]
-        Queue_Worker["Redis + Celery / Background Tasks"]
-    end
-
-    UI_Upload --> API_Router
-    UI_Checklist --> API_Router
-    API_Router --> API_Orch
-    API_Orch --> Queue_Worker
-    Queue_Worker --> Engine_Prof
-    Engine_Prof --> Engine_Detect --> Engine_Score --> Stage1
-    Stage3 --> UI_Checklist
-    UI_Checklist --"User Approvals"--> Engine_Pipe
-    Engine_Pipe --> Engine_Bench
-    Engine_Bench --> UI_Compare
-    Engine_Pipe --> S3_Store
-    API_Router --> DB_Postgres
-    UI_Export --> S3_Store
+    A["Raw Dataset Upload (.csv / .xlsx)"] --> B["Automated Type Profiling & Schema Inference"]
+    B --> C["User Defines Objective (Target Column + Problem Type)"]
+    C --> D["Comprehensive Diagnostic Profiling & Quality Scan"]
+    D --> E["Mathematical 0–100 Data Health Score Calculation"]
+    D --> F["3-Stage Explainable Remediation Engine (Stats -> Rules -> LLM Justifications)"]
+    E & F --> G["Interactive Diagnostic Dashboard & Approval Checklist"]
+    G -->|User Toggles & Approves Fixes| H["12-Step Safe-Order Transformation Execution Pipeline"]
+    H --> I["Post-Cleaning Health Score & Before/After Metric Diff Calculation"]
+    H --> J["3-Fold Cross-Validated ML Model Leaderboard Benchmarking"]
+    H --> K["Artifact Generation Hub (Cleaned CSV, Python Script, PDF Audit, JSON Manifest)"]
 ```
 
 ---
 
-## 🧠 The 3-Stage Explainable AI Decision Engine
+## 🧮 Mathematical Foundations & 0–100 Data Health Score
 
-To guarantee academic rigor, deterministic repeatability, and zero hallucination, the decision pipeline separates statistical logic from natural language generation:
+The platform computes a **0–100 composite Data Health Score** ($S_{\text{composite}}$) along with 6 individual sub-scores that quantify data readiness.
+
+```math
+S_{\text{composite}} = \sum_{i=1}^{6} w_i \cdot S_i
+$$
+```
+
+Where the weights $w_i$ and sub-scores $S_i$ are mathematically defined as follows:
+
+| Sub-Score Dimension ($S_i$) | Weight ($w_i$) | Mathematical Formula & Penalties | Thresholds & Risk Criteria |
+| :--- | :---: | :--- | :--- |
+| **1. Missingness Score** | **25%** ($0.25$) | $S_{\text{miss}} = \max\left(0, 100 - (\text{overall\_missing\_pct} \times 2.5)\right)$ | Penalizes total missing values. $>40\%$ missing reduces sub-score to $0$. |
+| **2. Duplication Score** | **15%** ($0.15$) | $S_{\text{dup}} = \max\left(0, 100 - (\text{duplicate\_rows\_pct} \times 5.0)\right)$ | $>20\%$ duplicate rows reduces sub-score to $0$ to prevent severe train-test leakage. |
+| **3. Outlier Score** | **15%** ($0.15$) | $S_{\text{out}} = \max\left(0, 100 - (\overline{\text{outlier\_pct}} \times 3.0 + N_{\text{outlier\_cols}} \times 4.0)\right)$ | Evaluates percentage of extreme points beyond $1.5 \times \text{IQR}$ across numeric columns. |
+| **4. Domain Validity Score** | **15%** ($0.15$) | $S_{\text{val}} = \max\left(0, 100 - (N_{\text{invalid\_cols}} \times 20.0)\right)$ | Penalizes negative values in strictly non-negative columns (age, salary, price, count). |
+| **5. Target Balance Score** | **15%** ($0.15$) | $S_{\text{bal}} = \max\left(0, 100 - (\text{majority\_ratio} - 0.5) \times 160.0\right)$ | For classification: $50:50 \rightarrow 100$, $95:5 \rightarrow 28$, $100:0 \rightarrow 20$. Defaults to $100.0$ for regression. |
+| **6. Feature Quality Score** | **15%** ($0.15$) | $S_{\text{feat}} = \max\left(0, 100 - (N_{\text{collinear\_pairs}} \times 10.0 + N_{\text{constant\_cols}} \times 15.0)\right)$ | Penalizes features with Pearson correlation $\|r\| > 0.85$ or near-zero variance ($\sigma^2 = 0$). |
+
+### Letter Grade Classifications
+* **`A (90–100)` — Excellent Readiness:** Data is model-ready with negligible defects.
+* **`B (80–89.9)` — Good Readiness:** Minor missingness or mild outliers present; standard pipelines will converge.
+* **`C (70–79.9)` — Fair (Needs Cleaning):** Moderate data quality defects that risk degrading gradient steps or accuracy.
+* **`D (60–69.9)` — Poor (High Risk):** Significant data leaks, heavy duplication, or severe multicollinearity.
+* **`F (<60)` — Critical Quality Defects:** Unusable without structural remediation.
+
+---
+
+## 🔍 Diagnostic & Quality Detection Suite
+
+The detector module ([`detector.py`](file:///c:/Users/Arif%20Choudhary/OneDrive/Desktop/Major%20project/backend/app/engine/detector.py)) runs a multi-pass statistical scan:
+
+### 1. Inferred Column Type Classification
+Each column is dynamically categorized into one of 6 semantic types:
+* **`numeric`**: Float or integer series with $>10$ unique numeric values.
+* **`categorical`**: Strings or low-cardinality integers ($\le 20$ unique categories).
+* **`boolean`**: Binary values (`{0, 1}`, `{'True', 'False'}`, `{'Yes', 'No'}`).
+* **`datetime`**: Dates matching standard ISO, timestamp, or slash formats.
+* **`id`**: Unique identifier columns (cardinality ratio $>0.98$ on string/integer series).
+* **`text`**: High-cardinality natural language or unformatted token sequences.
+
+### 2. Detection Algorithms & Heuristics
+
+* **Missing Values**:
+  * $\text{Missing Pct} > 50\%$ $\rightarrow$ Severity: **Critical** (Suggests feature elimination).
+  * $20\% < \text{Missing Pct} \le 50\%$ $\rightarrow$ Severity: **High** (Suggests advanced imputation or indicator flag).
+  * $0\% < \text{Missing Pct} \le 20\%$ $\rightarrow$ Severity: **Medium** (Suggests median/mode imputation).
+* **Exact Duplicate Rows**:
+  * Computes exact hash equality across all features using Pandas `df.duplicated()`.
+* **Statistical Outliers (Tukey's Fences)**:
+  * Lower Bound: $Q_1 - 1.5 \times \text{IQR}$
+  * Upper Bound: $Q_3 + 1.5 \times \text{IQR}$
+  * *Smart Filtering:* Skips columns representing calendar years, IDs, or columns with skewness $\approx 0$.
+* **Domain Validity & Mixed Units**:
+  * Detects negative numbers in non-negative keyword columns (`age`, `salary`, `income`, `price`, `cost`, `revenue`, `distance`, `fare`, `tenure`).
+  * Detects mixed unit strings (e.g. `"90 min"`, `"2 Seasons"`, `"120 km/h"`).
+* **Multicollinearity**:
+  * Computes the Pearson Correlation Matrix $R$. Any pair $(X_i, X_j)$ where $\|r_{ij}\| > 0.85$ triggers a collinearity warning.
+* **Class Imbalance**:
+  * For classification targets, computes the majority class percentage. Flags imbalances exceeding $70\%:30\%$.
+
+---
+
+## 🧠 3-Stage Explainable AI Recommendation Engine
 
 ```mermaid
-sequenceDiagram
-    autonumber
-    participant D as Raw Data
-    participant S1 as Stage 1: Statistical Profiler
-    participant S2 as Stage 2: Method Selector (Rule Matrix)
-    participant S3 as Stage 3: LLM Explainer (Claude/GPT)
-    participant U as User (Approval UI)
-
-    D->>S1: Compute skewness, missing %, kurtosis, outlier bounds, correlation
-    S1->>S2: Pass structured metrics (e.g., skewness=3.42, missing=14.2%, cat_cardinality=4)
-    Note over S2: Deterministic Rule Table:<br/>- Skewed numeric -> Median Imputation<br/>- Low cardinality categorical -> One-Hot<br/>- Severe imbalance (92:8) -> SMOTE + Balanced Weights
-    S2->>S3: Send structured proposal {issue, chosen_method, metrics}
-    Note over S3: Synthesizes plain-language explanation<br/>strictly citing given statistics.
-    S3->>U: Presents interactive card: "Why this method? (Skewness is 3.42 > 1.0...)"
-    U->>U: Accepts or rejects remediation step
+flowchart LR
+    S1["Stage 1: Deterministic Statistical Profile Extraction"] --> S2["Stage 2: Heuristic Rule Mapping (Action & Method)"]
+    S2 --> S3["Stage 3: LLM Plain-Language Justification (Gemini / OpenAI)"]
+    S3 --> S4["Explainable Recommendation Card"]
 ```
+
+### Stage 1: Deterministic Statistical Profiling
+Gathers raw column metrics: distribution skewness $\gamma_1$, missingness percentage, cardinality, variance, min, max, and correlation.
+
+### Stage 2: Heuristic Rule Mapping ([`rules.py`](file:///c:/Users/Arif%20Choudhary/OneDrive/Desktop/Major%20project/backend/app/engine/rules.py))
+Maps detected issues to standard Scikit-Learn remediation transformations:
+* High Missingness ($>50\%$) $\rightarrow$ `Drop Redundant / High-Missingness Feature`
+* Continuous Numeric Missingness $\rightarrow$ `Median Imputation (Skewed)` or `Mean Imputation (Normal)`
+* Categorical Missingness $\rightarrow$ `Mode Imputation` or `Constant Fill ('Unknown')`
+* Extreme Outliers $\rightarrow$ `IQR Winsorization / Capping (1.5x IQR)`
+* Non-Negative Domain Breach $\rightarrow$ `Zero-Clipping Transformation`
+* Collinear Pair $\rightarrow$ `Drop Redundant Collinear Feature`
+* High-Cardinality Categoricals $\rightarrow$ `Frequency / Target Encoding` or `Drop High-Cardinality ID`
+
+### Stage 3: Generative AI Justification ([`explainer.py`](file:///c:/Users/Arif%20Choudhary/OneDrive/Desktop/Major%20project/backend/app/engine/explainer.py))
+The system feeds the exact statistical parameters into an LLM (Google Gemini or OpenAI) to generate a high-clarity explanation answering:
+1. *Why does this defect degrade machine learning models?*
+2. *Why is this specific remediation algorithm the mathematically optimal choice?*
+3. *What is the exact impact on variance, bias, and inference?*
+
+> **Zero-Failure Fallback:** If API keys are missing or the network fails, the system seamlessly uses deterministic, high-accuracy statistical fallback templates so execution never halts.
 
 ---
 
-## 📊 High-Level Data Model (PostgreSQL)
+## ⚙️ Safe-Order 12-Step Transformation Execution Engine
+
+When the user clicks **"Apply Fixes & Verify"**, transformations are applied in an immutable, mathematically safe order ([`executor.py`](file:///c:/Users/Arif%20Choudhary/OneDrive/Desktop/Major%20project/backend/app/engine/executor.py)):
 
 ```mermaid
-erDiagram
-    USERS ||--o{ DATASETS : uploads
-    DATASETS ||--o{ OBJECTIVES : defines
-    DATASETS ||--o{ PROFILE_REPORTS : generates
-    DATASETS ||--o{ ISSUE_DETECTIONS : flags
-    DATASETS ||--o{ HEALTH_SCORES : computes
-    DATASETS ||--o{ RECOMMENDATIONS : produces
-    DATASETS ||--o{ PROCESSING_JOBS : executes
-    DATASETS ||--o{ MODEL_BENCHMARKS : ranks
-
-    USERS {
-        uuid id PK
-        string email
-        string password_hash
-        timestamp created_at
-    }
-
-    DATASETS {
-        uuid id PK
-        uuid user_id FK
-        string filename
-        string s3_raw_path
-        string s3_cleaned_path
-        int row_count
-        int col_count
-        timestamp uploaded_at
-    }
-
-    OBJECTIVES {
-        uuid id PK
-        uuid dataset_id FK
-        enum problem_type "classification | regression"
-        string target_column
-    }
-
-    HEALTH_SCORES {
-        uuid id PK
-        uuid dataset_id FK
-        enum stage "before | after"
-        float composite_score "0 to 100"
-        jsonb sub_scores
-    }
-
-    RECOMMENDATIONS {
-        uuid id PK
-        uuid dataset_id FK
-        string issue_type
-        string target_column
-        string recommended_method
-        text plain_explanation
-        enum status "pending | approved | rejected"
-    }
-
-    MODEL_BENCHMARKS {
-        uuid id PK
-        uuid dataset_id FK
-        string model_name
-        string metric_name
-        float metric_value
-        int rank
-    }
+graph TD
+    S1["1. Exact Deduplication"] --> S2["2. Datetime Feature Engineering"]
+    S2 --> S3["3. Mixed Unit Parsing"]
+    S3 --> S4["4. Delimited Token Multi-Hot Encoding"]
+    S4 --> S5["5. Invalid Domain Value Clipping"]
+    S5 --> S6["6. Drop Collinear & Unviable Features"]
+    S6 --> S7["7. Semantic Missing Value Imputation"]
+    S7 --> S8["8. High-Cardinality Binning & ID Filtering"]
+    S8 --> S9["9. Outlier Winsorization"]
+    S9 --> S10["10. Categorical One-Hot Encoding"]
+    S10 --> S11["11. StandardScaler Normalization"]
+    S11 --> S12["12. SMOTE Target Resampling"]
 ```
+
+### Why Execution Order Matters:
+1. **Deduplication First:** Prevents duplicate rows from distorting column medians, means, and standard deviations.
+2. **Datetime & Units Extracted Early:** Allows newly generated continuous features (e.g. `release_year`, `duration_minutes`) to participate in downstream imputation and scaling.
+3. **Dropping Features Before Imputation:** Avoids wasting compute power estimating values for columns destined to be removed.
+4. **Imputation Before Winsorization:** Ensures quantile computations ($Q_1, Q_3$) operate on full arrays without NaN pollution.
+5. **Encoding Before Scaling:** Converts categorical strings to binary columns so that numerical scaling normalizes all active inputs uniformly.
+6. **Resampling (SMOTE) Last:** Ensures synthetic minority oversampling occurs only on fully encoded, imputed, and scaled matrices.
 
 ---
 
-## 🛠️ Technology Stack
+## 🏆 Cross-Validation & Model Benchmarking Engine
 
-| Layer | Technologies | Purpose |
-| :--- | :--- | :--- |
-| **Frontend** | Next.js 14+ (React, TypeScript), Vanilla CSS / Tailored CSS, Lucide Icons | Server-side rendering, responsive dashboard, real-time job feedback |
-| **Backend API** | FastAPI (Python 3.11), Pydantic v2, Uvicorn | High-performance asynchronous API, auto OpenAPI documentation |
-| **Data Engine & ML** | pandas, numpy, scipy, scikit-learn, statsmodels | Core statistical profiling, outlier detection, data pipelines |
-| **Benchmarking Suite** | scikit-learn, XGBoost, LightGBM, CatBoost | Fast multi-algorithm cross-validation on clean datasets |
-| **Explainability (LLM)** | Anthropic Claude API / OpenAI GPT-4o / Template Fallback | Grounded natural language justification for recommended fixes |
-| **Database & ORM** | PostgreSQL, SQLAlchemy 2.0, Alembic | Relational data persistence, schema migrations |
-| **Object Storage** | AWS S3 / MinIO | Scalable raw & clean file storage, serialized pipelines, reports |
-| **Async Processing** | Redis, Celery / FastAPI BackgroundTasks | Offloading heavy profiling and model fitting from HTTP threads |
-| **PDF Reporting** | ReportLab / WeasyPrint | Compiling downloadable executive Data Quality Reports |
-| **DevOps & Container** | Docker, Docker Compose | Multi-container orchestration (web, api, db, redis, worker) |
+Once the dataset is transformed, the platform automatically trains and benchmarks an ensemble of candidate algorithms ([`benchmark.py`](file:///c:/Users/Arif%20Choudhary/OneDrive/Desktop/Major%20project/backend/app/engine/benchmark.py)).
+
+### Cross-Validation Strategy
+
+#### 1. Classification Problems
+* **Validation Method:** **`StratifiedKFold(n_splits=3, shuffle=True, random_state=42)`**
+* **Scoring Metric:** **Macro F1-Score** (`make_scorer(f1_score, average="macro", zero_division=0)`)
+* **Purpose:** Preserves exact class balance ratios across training and test splits to guard against misleading accuracy in imbalanced scenarios.
+
+#### 2. Regression Problems
+* **Validation Method:** **`KFold(n_splits=3, shuffle=True, random_state=42)`**
+* **Scoring Metric:** **$R^2$ Score (Coefficient of Determination)** (`make_scorer(r2_score)`)
+* **Purpose:** Evaluates variance explanation across independent folds without distributional bias.
+
+### Benchmarked Model Pool
+
+```
+┌──────────────────────────────────────────────┬──────────────────────────────────────────────┐
+│ Classification Candidate Models              │ Regression Candidate Models                  │
+├──────────────────────────────────────────────┼──────────────────────────────────────────────┤
+│ • Random Forest Classifier (25 estimators)   │ • Random Forest Regressor (25 estimators)    │
+│ • XGBoost Classifier (if available)          │ • XGBoost Regressor (if available)           │
+│ • LightGBM Classifier (if available)         │ • LightGBM Regressor (if available)          │
+│ • Gradient Boosting Classifier               │ • Gradient Boosting Regressor                │
+│ • Logistic Regression (L2 Regularized)       │ • Ridge Regression (L2 Regularized)          │
+│ • Decision Tree Classifier (Max Depth = 5)   │ • Decision Tree Regressor (Max Depth = 5)    │
+│ • Support Vector Machine (RBF Kernel)        │ • Support Vector Regressor (SVR RBF Kernel)  │
+└──────────────────────────────────────────────┴──────────────────────────────────────────────┘
+```
+
+The output yields a ranked **Leaderboard** detailing:
+* Model Rank & Name
+* Cross-Validated Score ($\text{Macro F1}$ or $R^2$)
+* Training Execution Latency ($\text{seconds}$)
+* Suitability Rating (`High` / `Moderate` / `Low`)
+* Architectural Description & Rationale
 
 ---
 
-## 📂 Project Repository Structure
+## 📦 Export Hub & Reproducible Artifact Generation
+
+Upon execution, the engine compiles 4 production-grade export artifacts:
+
+1. **Cleaned Dataset (`.csv`):** Fully sanitized, transformed, and model-ready tabular file.
+2. **Standalone Python Pipeline Script (`.py`):** Self-contained, executable Scikit-Learn script containing the exact sequence of transformations for local integration or CI/CD pipelines.
+3. **Executive PDF Audit Report (`.pdf`):** Formal ReportLab-generated audit document with Data Health Score dials, issue breakdowns, before/after metric deltas, and model recommendations.
+4. **Machine-Readable JSON Manifest (`.json`):** Full telemetry metadata containing column profiles, statistical issues, applied remediation rules, and benchmarking leaderboards.
+
+---
+
+## 📂 Project Directory & File Structure
 
 ```
-Aegis_mind/
-├── backend/
+Major project/
+├── backend/                               # FastAPI Python Backend
 │   ├── app/
-│   │   ├── api/                  # API routers (auth, datasets, profiling, pipeline, models)
-│   │   │   ├── v1/
-│   │   │   │   ├── auth.py
-│   │   │   │   ├── datasets.py
-│   │   │   │   ├── profiling.py
-│   │   │   │   ├── recommendations.py
-│   │   │   │   ├── pipeline.py
-│   │   │   │   └── models.py
-│   │   │   └── router.py
-│   │   ├── core/                 # Config, security, database session
-│   │   │   ├── config.py
-│   │   │   ├── database.py
-│   │   │   └── security.py
-│   │   ├── engine/               # Core analytical and ML intelligence
-│   │   │   ├── profiler.py       # Column & dataset profiling logic
-│   │   │   ├── detector.py       # Outlier, missingness, imbalance detectors
-│   │   │   ├── scorer.py         # Composite & sub-score calculation
-│   │   │   ├── rules.py          # Decision rule matrix (Stage 2)
-│   │   │   ├── explainer.py      # Grounded LLM prompt synthesis (Stage 3)
-│   │   │   ├── executor.py       # Safe-order scikit-learn pipeline builder
-│   │   │   └── benchmark.py      # Quick candidate model benchmark runner
-│   │   ├── models/               # SQLAlchemy ORM models
-│   │   ├── schemas/              # Pydantic schemas (request/response)
-│   │   ├── services/             # S3 storage, PDF report generator
-│   │   └── main.py               # FastAPI entry point
-│   ├── tests/                    # Unit and integration test suite
-│   ├── Dockerfile
-│   └── requirements.txt
-├── frontend/
-│   ├── src/
-│   │   ├── app/                  # Next.js App Router pages
-│   │   │   ├── dashboard/        # Main workspace & projects
-│   │   │   ├── dataset/[id]/     # Dataset profiling & health score view
-│   │   │   ├── recommendations/  # Interactive approval checklist
-│   │   │   ├── compare/          # Before vs. After quality diff
-│   │   │   ├── benchmark/        # ML model recommendations
-│   │   │   └── login/            # Auth pages
-│   │   ├── components/           # Reusable UI components (Score gauges, tables, cards)
-│   │   ├── hooks/                # Custom React hooks
-│   │   ├── services/             # API client services (Axios / Fetch)
-│   │   └── styles/               # CSS Design System
-│   ├── Dockerfile
-│   └── package.json
-├── docker-compose.yml            # Multi-service setup (frontend, backend, postgres, redis)
-└── README.md                     # Project documentation
+│   │   ├── core/
+│   │   │   └── config.py                  # Environment settings, CORS, LLM API keys
+│   │   ├── engine/                        # Core Data Intelligence Engines
+│   │   │   ├── profiler.py                # Type inference & summary statistics
+│   │   │   ├── detector.py                # Multi-pass data defect detection
+│   │   │   ├── scorer.py                  # 0–100 Data Health Score algorithm
+│   │   │   ├── rules.py                   # Heuristic recommendation generator
+│   │   │   ├── explainer.py               # AI justifications (Gemini / OpenAI)
+│   │   │   ├── executor.py                # 12-Step safe-order transformation pipeline
+│   │   │   ├── benchmark.py               # 3-Fold cross-validation model evaluator
+│   │   │   └── reporter.py                # PDF ReportLab generator
+│   │   ├── routers/                       # REST API Route Controllers
+│   │   │   ├── ingestion.py               # File upload & profile endpoints
+│   │   │   ├── diagnosis.py               # Objective & health diagnosis
+│   │   │   ├── remediation.py             # Transformation pipeline execution
+│   │   │   └── export.py                  # Download & artifact endpoints
+│   │   └── main.py                        # FastAPI application entrypoint
+│   ├── storage/                           # Ingested datasets & export artifacts
+│   ├── requirements.txt                   # Python dependencies
+│   └── .env                               # Environment configurations
+│
+├── frontend/                              # Next.js Turborepo Workspace
+│   ├── apps/
+│   │   ├── dashboard/                     # Main Application UI
+│   │   │   └── src/
+│   │   │       ├── app/                   # App Router pages & global styles
+│   │   │       │   ├── page.tsx           # Step-by-step diagnostic workflow
+│   │   │       │   └── globals.css        # Design tokens & modern light theme
+│   │   │       ├── components/            # UI Components
+│   │   │       │   ├── Header.tsx         # Platform navbar & dataset indicator
+│   │   │       │   ├── Stepper.tsx        # 5-stage progress indicator
+│   │   │       │   ├── UploadStep.tsx     # Drag-and-drop ingestion zone
+│   │   │       │   ├── ObjectiveStep.tsx  # Target column & problem selector
+│   │   │       │   ├── HealthScoreGauge.tsx # Radial SVG health score meter
+│   │   │       │   ├── ProfileTable.tsx   # Feature profiling matrix table
+│   │   │       │   ├── RecommendationChecklist.tsx # Explainable fix approvals
+│   │   │       │   ├── BeforeAfterDiff.tsx # Before vs after delta comparison
+│   │   │       │   ├── ModelLeaderboard.tsx # Ranked ML model benchmark cards
+│   │   │       │   └── ExportHub.tsx      # Artifact download hub
+│   │   │       └── services/
+│   │   │           └── api.ts             # Axios API client & data interfaces
+│   │   └── landing/                       # Product Landing & Feature Showcase
+│   ├── package.json                       # Turborepo root configuration
+│   └── turbo.json                         # Turborepo pipeline caching
+│
+└── README.md                              # Complete System Documentation
 ```
 
 ---
 
-## ⚡ Quick Start & Local Development
+## 🔌 REST API Data Contracts & Endpoint Reference
+
+### Base URL: `http://localhost:8000/api/v1`
+
+| Method | Endpoint | Description | Request Payload / Params | Response Payload |
+| :--- | :--- | :--- | :--- | :--- |
+| `POST` | `/datasets/upload` | Ingest raw CSV or Excel dataset | `multipart/form-data` (`file`) | `DatasetSummary` (ID, rows, cols, preview sample) |
+| `POST` | `/diagnose` | Run full diagnostic profiling & AI fixes | `{"dataset_id": "...", "problem_type": "...", "target_column": "..."}` | `DiagnosticResponse` (Profile, Health Score, Recommendations) |
+| `POST` | `/execute` | Run safe-order cleaning & benchmarking | `{"dataset_id": "...", "approved_recommendation_ids": [...]}` | `ExecutionResult` (Before/After Score, Leaderboard, Deltas) |
+| `GET` | `/export/csv/{dataset_id}` | Download model-ready CSV | Path Parameter: `dataset_id` | File download (`.csv`) |
+| `GET` | `/export/pipeline/{dataset_id}`| Download standalone Python code | Path Parameter: `dataset_id` | File download (`.py`) |
+| `GET` | `/export/pdf/{dataset_id}` | Download executive PDF audit | Path Parameter: `dataset_id` | File download (`.pdf`) |
+| `GET` | `/export/manifest/{dataset_id}`| Download machine-readable manifest | Path Parameter: `dataset_id` | JSON payload (`manifest.json`) |
+
+---
+
+## 🚀 Installation & Local Setup Guide
 
 ### Prerequisites
-- **Node.js** (v18.x or v20.x)
-- **Python** (v3.11+)
-- **Docker & Docker Compose** (optional, recommended for full stack)
-- **PostgreSQL** & **Redis** (if running without Docker)
+* **Python 3.10+** (Python 3.11 recommended)
+* **Node.js 18+** & **npm 9+**
+* Optional: Gemini API Key (`GEMINI_API_KEY`) or OpenAI API Key (`OPENAI_API_KEY`)
 
 ---
 
-### Option 1: Quickstart with Docker Compose (Recommended)
+### Step 1: Backend Setup
 
-1. **Clone the repository:**
+1. Open terminal and navigate to the backend directory:
    ```bash
-   git clone https://github.com/NishantDakua/Aegis_mind.git
-   cd Major\ project
+   cd backend
    ```
 
-2. **Configure environment variables:**
-   Create a `.env` file in the root directory:
+2. Create and activate a Python virtual environment:
+   ```bash
+   # Windows (PowerShell)
+   python -m venv venv
+   .\venv\Scripts\Activate.ps1
+
+   # macOS / Linux
+   python3 -m venv venv
+   source venv/bin/activate
+   ```
+
+3. Install required Python packages:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. Configure your `.env` file in the `backend/` folder:
    ```env
-   # Backend Settings
    PROJECT_NAME="AI Data Readiness Platform"
-   DATABASE_URL=postgresql://postgres:postgres@db:5432/datareadiness_db
-   SECRET_KEY=your_super_secret_jwt_key
-   REDIS_URL=redis://redis:6379/0
+   API_V1_STR="/api/v1"
+   BACKEND_CORS_ORIGINS=["http://localhost:3000","http://localhost:3001"]
 
-   # Object Storage (AWS S3 or Local MinIO)
-   S3_BUCKET_NAME=data-readiness-artifacts
-   AWS_ACCESS_KEY_ID=your_aws_key
-   AWS_SECRET_ACCESS_KEY=your_aws_secret
-   AWS_REGION=us-east-1
-
-   # LLM API (Anthropic or OpenAI)
-   LLM_PROVIDER=anthropic
-   ANTHROPIC_API_KEY=sk-ant-api03-...
-   # OPENAI_API_KEY=sk-...
+   # Optional: AI Reasoning API Keys (Defaults to statistical template fallback if omitted)
+   GEMINI_API_KEY="your-gemini-api-key-here"
+   OPENAI_API_KEY=""
    ```
 
-3. **Build and start all services:**
+5. Start the FastAPI backend server:
    ```bash
-   docker-compose up --build
+   uvicorn app.main:app --reload --port 8000
+   ```
+   * *Swagger API Interactive Docs:* [http://localhost:8000/docs](http://localhost:8000/docs)
+   * *API Health Check:* [http://localhost:8000/health](http://localhost:8000/health)
+
+---
+
+### Step 2: Frontend Setup
+
+1. Open a new terminal and navigate to the frontend directory:
+   ```bash
+   cd frontend
    ```
 
-4. **Access the application:**
-   - Frontend: `http://localhost:3000`
-   - FastAPI Docs: `http://localhost:8000/docs`
+2. Install Node dependencies:
+   ```bash
+   npm install
+   ```
+
+3. Start the Next.js development server:
+   ```bash
+   # Start all applications via Turborepo
+   npm run dev
+
+   # Or run dashboard directly
+   npm run dev:dashboard
+   ```
+
+4. Open your browser and navigate to:
+   * **Dashboard Application:** [http://localhost:3000](http://localhost:3000) (or port displayed in terminal)
+   * **Landing Page:** [http://localhost:3001](http://localhost:3001)
 
 ---
 
-### Option 2: Manual Local Setup
+## 🛡️ License
 
-#### 1. Backend Setup
-```bash
-cd backend
-python -m venv venv
-
-# Windows
-.\venv\Scripts\activate
-# macOS/Linux
-source venv/bin/activate
-
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
-```
-
-#### 2. Frontend Setup
-```bash
-cd frontend
-npm install
-npm run dev
-```
-Open [http://localhost:3000](http://localhost:3000) to view the web app.
-
----
-
-## 📈 Success & Evaluation Metrics
-
-- **Diagnostic Speed:** Sub-30-second profiling and issue detection on 100K-row tabular datasets.
-- **Explainability Grounding:** Zero ungrounded statistical citations generated by the LLM layer.
-- **Downstream Correlation:** Demonstrated positive correlation between Health Score improvement and downstream classification/regression test scores across benchmark datasets (*Titanic, House Prices, Adult Income, Churn*).
-- **Viva/Demo Ready:** Complete end-to-end user journey executable live within 5 to 7 minutes.
-
----
-
-## 👥 Contributors & Acknowledgements
-
-- **Author:** Arif Choudhary
-- **Project Type:** Final-Year AIML Capstone Project
-- **Corpus / Repository:** `NishantDakua/Aegis_mind`
-- **Supervisor / Evaluation:** AIML Capstone Review Committee
-
----
-
-## 📄 License
-
-This project is licensed under the [MIT License](LICENSE) — free for educational, research, and commercial exploration.
+This project is licensed under the **MIT License**.

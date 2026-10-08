@@ -1,5 +1,5 @@
 {
-  "name": "aegismind-monorepo",
+  "name": "nebulus-monorepo",
   "version": "1.0.0",
   "private": true,
   "workspaces": [

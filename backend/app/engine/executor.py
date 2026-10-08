@@ -1,346 +1,267 @@
-import re
-import os
-import pandas as pd
+import inspect
+from collections import defaultdict
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
+
 import numpy as np
-from typing import List, Dict, Any, Tuple
-from sklearn.preprocessing import StandardScaler
-from app.core.config import settings
-from app.engine.profiler import infer_column_type
+import pandas as pd
+
+from app.engine import transforms as T
+from app.engine.profiler import duplicate_subset
+
+MAX_ONE_HOT_CATEGORIES = 50
+MAX_MULTI_HOT_TOKENS = 15
+
+
+@dataclass
+class PipelineResult:
+    df_cleaned: pd.DataFrame          # cleaned, human-readable (before encoding) - used for re-scoring
+    df_model_ready: pd.DataFrame      # final exported dataset (encoded if approved)
+    applied_steps: List[str] = field(default_factory=list)
+    script_code: str = ""
+    dropped_informative_columns: List[str] = field(default_factory=list)
+
+
+def _py(value: Any) -> Any:
+    """Converts numpy scalars/containers to plain Python so they repr() cleanly into the script."""
+    if isinstance(value, dict):
+        return {k: _py(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_py(v) for v in value]
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
+
+
+def _finite_or(value: Any, fallback: float) -> float:
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return fallback
+    return fallback if np.isnan(f) or np.isinf(f) else f
+
+
+def _build_script(ops: List[Tuple[str, Dict[str, Any]]]) -> str:
+    lines = [
+        "# ==========================================================",
+        "# Auto-Generated Pre-ML Preprocessing Pipeline",
+        "# AI Data Readiness Platform",
+        "# Reproduces the exported cleaned dataset using the exact fitted parameters.",
+        "# Feature scaling and class rebalancing are intentionally NOT applied here:",
+        "# fit them inside your model's cross-validation / training pipeline.",
+        "# ==========================================================",
+        inspect.getsource(T),
+        "",
+        "def clean_data(df_raw: pd.DataFrame) -> pd.DataFrame:",
+        "    df = df_raw.copy()",
+        "    df.columns = [str(c) for c in df.columns]",
+    ]
+    for name, kwargs in ops:
+        args = ", ".join(f"{k}={v!r}" for k, v in kwargs.items())
+        lines.append(f"    df = {name}(df, {args})")
+    lines += [
+        "    return df",
+        "",
+        "",
+        "if __name__ == '__main__':",
+        "    import sys",
+        "    if len(sys.argv) < 2:",
+        "        print('Usage: python pipeline.py raw_dataset.csv [output.csv]')",
+        "        sys.exit(1)",
+        "    cleaned = clean_data(pd.read_csv(sys.argv[1]))",
+        "    out_path = sys.argv[2] if len(sys.argv) > 2 else 'cleaned_dataset.csv'",
+        "    cleaned.to_csv(out_path, index=False)",
+        "    print(f'Saved {cleaned.shape[0]} rows x {cleaned.shape[1]} columns to {out_path}')",
+        "",
+    ]
+    return "\n".join(lines)
 
 
 def execute_pipeline(
     df_raw: pd.DataFrame,
     recommendations: List[Dict[str, Any]],
-    target_col: str = None,
+    target_col: Optional[str] = None,
     problem_type: str = "classification",
-) -> Tuple[pd.DataFrame, List[str], str]:
+) -> PipelineResult:
     """
-    Executes domain-aware remediation transformations in a safe mathematical sequence:
-    1. Deduplication
-    2. Datetime feature extraction (year, month, day)
-    3. Mixed unit parsing (e.g. duration_value + duration_unit)
-    4. Multi-label delimited token multi-hot encoding
-    5. Invalid domain value clipping (negative to 0.0)
-    6. Drop unviable / collinear features
-    7. Semantic Missing Value Imputation (Unknown for entities, Median/Mean for numeric, Mode for low-card categories)
-    8. High-cardinality entity binning & ID filtering
-    9. Outlier Winsorization (IQR bounds - excluding year/age features)
-    10. Categorical One-Hot Encoding
-    11. StandardScaler numeric normalization
-    12. SMOTE target resampling (if applicable)
-
-    Returns (df_cleaned, applied_transformations_list, python_script_code).
+    Executes the approved remediation steps in a safe order:
+    missing-target rows -> duplicates -> identifiers -> datetime -> units -> multi-label ->
+    invalid negatives -> column drops -> outlier capping -> imputation -> rare grouping -> encoding.
+    Only approved recommendations are executed.
     """
     df = df_raw.copy()
-    applied_steps = []
-    script_lines = [
-        "# ==========================================================",
-        "# Auto-Generated Domain-Aware Pre-ML Preprocessing Pipeline",
-        "# AI Data Readiness Platform",
-        "# ==========================================================",
-        "import re",
-        "import pandas as pd",
-        "import numpy as np",
-        "from sklearn.preprocessing import StandardScaler",
-        "",
-        "def clean_data(df_raw: pd.DataFrame) -> pd.DataFrame:",
-        "    df = df_raw.copy()",
-    ]
+    df.columns = [str(c) for c in df.columns]
+    steps: List[str] = []
+    ops: List[Tuple[str, Dict[str, Any]]] = []
 
-    approved_recs = [r for r in recommendations if r.get("is_approved", True)]
-    rec_by_type = {}
-    for r in approved_recs:
-        rec_by_type.setdefault(r["issue_type"], []).append(r)
+    def apply(func_name: str, description: str, **kwargs):
+        nonlocal df
+        kwargs = _py(kwargs)
+        df = getattr(T, func_name)(df, **kwargs)
+        ops.append((func_name, kwargs))
+        steps.append(description)
 
-    # -------------------------------------------------------------
-    # Step 1: Exact Deduplication
-    # -------------------------------------------------------------
-    if "duplicate_rows" in rec_by_type:
-        before_len = len(df)
-        df = df.drop_duplicates().reset_index(drop=True)
-        dropped_count = before_len - len(df)
-        applied_steps.append(f"Deduplication: Removed {dropped_count} exact duplicate records.")
-        script_lines.append("    # Step 1: Remove exact duplicates")
-        script_lines.append("    df = df.drop_duplicates().reset_index(drop=True)")
+    by_key: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for r in recommendations:
+        if r.get("is_approved"):
+            key = (r.get("params") or {}).get("method_key")
+            if key:
+                by_key[key].append(r)
 
-    # -------------------------------------------------------------
-    # Step 2: Datetime Feature Engineering
-    # -------------------------------------------------------------
-    datetime_recs = rec_by_type.get("unparsed_datetime_feature", [])
-    if datetime_recs:
-        script_lines.append("    # Step 2: Extract chronological signals from date columns")
-        for r in datetime_recs:
-            col = r.get("column")
-            if col and col in df.columns and col != target_col:
-                try:
-                    import warnings
-                    with warnings.catch_warnings():
-                        warnings.simplefilter("ignore")
-                        dt_parsed = pd.to_datetime(df[col], format="mixed", errors="coerce")
-                    year_col = f"{col}_year"
-                    month_col = f"{col}_month"
-                    df[year_col] = dt_parsed.dt.year.fillna(dt_parsed.dt.year.median() if dt_parsed.dt.year.notna().any() else 2020)
-                    df[month_col] = dt_parsed.dt.month.fillna(6)
-                    df = df.drop(columns=[col])
-                    applied_steps.append(f"Datetime Engineering: Parsed '{col}' into '{year_col}' and '{month_col}'.")
-                    script_lines.append(f"    if '{col}' in df.columns:")
-                    script_lines.append(f"        dt_p = pd.to_datetime(df['{col}'], format='mixed', errors='coerce')")
-                    script_lines.append(f"        df['{year_col}'] = dt_p.dt.year.fillna(dt_p.dt.year.median())")
-                    script_lines.append(f"        df['{month_col}'] = dt_p.dt.month.fillna(6)")
-                    script_lines.append(f"        df = df.drop(columns=['{col}'])")
-                except Exception:
-                    pass
+    def is_feature(col: Optional[str]) -> bool:
+        return bool(col) and col in df.columns and col != target_col
 
-    # -------------------------------------------------------------
-    # Step 3: Mixed Unit Disentanglement (e.g. Duration: '90 min', '2 Seasons')
-    # -------------------------------------------------------------
-    unit_recs = rec_by_type.get("unit_mixed_feature", [])
-    if unit_recs:
-        script_lines.append("    # Step 3: Parse mixed magnitude and unit strings")
-        unit_regex = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([a-zA-Z%]+)?\s*$")
-        for r in unit_recs:
-            col = r.get("column")
-            if col and col in df.columns and col != target_col:
-                try:
-                    vals = []
-                    units = []
-                    for item in df[col].astype(str):
-                        m = unit_regex.match(str(item).strip())
-                        if m:
-                            vals.append(float(m.group(1)))
-                            units.append(m.group(2).lower() if m.group(2) else "unit")
-                        else:
-                            vals.append(np.nan)
-                            units.append("unknown")
+    # 1. Rows without a target label
+    if by_key.get("drop_missing_target") and target_col and target_col in df.columns:
+        n_missing = int(df[target_col].isna().sum())
+        if n_missing:
+            apply("drop_rows_missing", f"Target Labels: Dropped {n_missing} rows with a missing '{target_col}'.", column=target_col)
 
-                    val_col = f"{col}_value"
-                    unit_col = f"{col}_unit"
-                    df[val_col] = pd.Series(vals, index=df.index).fillna(pd.Series(vals).median())
-                    df[unit_col] = pd.Series(units, index=df.index)
-                    df = df.drop(columns=[col])
-                    applied_steps.append(f"Unit Disentanglement: Parsed '{col}' into numeric '{val_col}' and categorical '{unit_col}'.")
-                    script_lines.append(f"    if '{col}' in df.columns:")
-                    script_lines.append(f"        # Disentangle {col} numeric value and unit")
-                    script_lines.append(f"        extracted = df['{col}'].astype(str).str.extract(r'(\\d+(?:\\.\\d+)?)\\s*([a-zA-Z%]+)?')")
-                    script_lines.append(f"        df['{val_col}'] = pd.to_numeric(extracted[0], errors='coerce').fillna(0.0)")
-                    script_lines.append(f"        df['{unit_col}'] = extracted[1].fillna('unit').str.lower()")
-                    script_lines.append(f"        df = df.drop(columns=['{col}'])")
-                except Exception:
-                    pass
+    # 2. Duplicate records (identifier columns ignored)
+    if by_key.get("drop_duplicates"):
+        subset = duplicate_subset(df)
+        before = len(df)
+        n_dups = int(df.duplicated(subset=subset).sum())
+        if n_dups:
+            apply("drop_duplicate_rows", f"Deduplication: Removed {n_dups} duplicate records ({before} -> {before - n_dups} rows).", subset=subset)
 
-    # -------------------------------------------------------------
-    # Step 4: Multi-Label Delimited Token Encoding
-    # -------------------------------------------------------------
-    multilabel_recs = rec_by_type.get("multilabel_delimited_text", [])
-    if multilabel_recs:
-        script_lines.append("    # Step 4: Multi-Hot encode delimited token lists")
-        for r in multilabel_recs:
-            col = r.get("column")
-            if col and col in df.columns and col != target_col:
-                try:
-                    # Collect all individual tokens
-                    all_tokens = []
-                    for cell in df[col].dropna().astype(str):
-                        for token in re.split(r"[,;|]", cell):
-                            t_clean = token.strip()
-                            if t_clean:
-                                all_tokens.append(t_clean)
+    # 3. Identifier columns
+    id_cols = [r["column"] for r in by_key.get("drop_identifier", []) if is_feature(r["column"])]
+    if id_cols:
+        apply("drop_columns", f"Identifiers: Dropped non-predictive ID column(s): {', '.join(id_cols)}.", columns=id_cols)
 
-                    top_tokens = pd.Series(all_tokens).value_counts().head(12).index.tolist()
-                    for token in top_tokens:
-                        safe_token_name = f"{col}_{re.sub(r'[^a-zA-Z0-9]', '_', token).lower()}"
-                        df[safe_token_name] = df[col].astype(str).apply(lambda x: 1.0 if token in str(x) else 0.0)
-
-                    df = df.drop(columns=[col])
-                    applied_steps.append(f"Multi-Label Encoding: Tokenized '{col}' into {len(top_tokens)} binary tag indicators.")
-                    script_lines.append(f"    if '{col}' in df.columns:")
-                    script_lines.append(f"        top_tokens = {top_tokens}")
-                    script_lines.append(f"        for token in top_tokens:")
-                    script_lines.append(f"            df[f'{col}_{{re.sub(r\"[^a-zA-Z0-9]\", \"_\", token).lower()}}'] = df['{col}'].astype(str).apply(lambda x: 1.0 if token in str(x) else 0.0)")
-                    script_lines.append(f"        df = df.drop(columns=['{col}'])")
-                except Exception:
-                    pass
-
-    # -------------------------------------------------------------
-    # Step 5: Invalid Domain Values Clipping
-    # -------------------------------------------------------------
-    if "invalid_domain_values" in rec_by_type:
-        script_lines.append("    # Step 5: Fix domain invalid negative values")
-        for r in rec_by_type["invalid_domain_values"]:
-            col = r.get("column")
-            if col and col in df.columns and pd.api.types.is_numeric_dtype(df[col]):
-                df[col] = df[col].clip(lower=0.0)
-                applied_steps.append(f"Domain Validity: Clipped negative values in '{col}' to 0.0.")
-                script_lines.append(f"    if '{col}' in df.columns: df['{col}'] = df['{col}'].clip(lower=0.0)")
-
-    # -------------------------------------------------------------
-    # Step 6: Drop Redundant / Collinear Columns
-    # -------------------------------------------------------------
-    cols_to_drop = []
-    if "constant_feature" in rec_by_type:
-        for r in rec_by_type["constant_feature"]:
-            col = r.get("column")
-            if col and col in df.columns and col != target_col:
-                cols_to_drop.append(col)
-
-    if "multicollinear_features" in rec_by_type:
-        for r in rec_by_type["multicollinear_features"]:
-            col = r.get("column")
-            if col and col in df.columns and col != target_col:
-                cols_to_drop.append(col)
-
-    if "missing_values" in rec_by_type:
-        for r in rec_by_type["missing_values"]:
-            if "Drop" in r.get("method", ""):
-                col = r.get("column")
-                if col and col in df.columns and col != target_col:
-                    cols_to_drop.append(col)
-
-    cols_to_drop = list(set(cols_to_drop))
-    if cols_to_drop:
-        df = df.drop(columns=cols_to_drop, errors="ignore")
-        applied_steps.append(f"Dimensionality: Dropped redundant/collinear features: {', '.join(cols_to_drop)}.")
-        script_lines.append(f"    # Step 6: Drop redundant features")
-        script_lines.append(f"    df = df.drop(columns={cols_to_drop}, errors='ignore')")
-
-    # -------------------------------------------------------------
-    # Step 7: Semantic Missing Value Imputation
-    # -------------------------------------------------------------
-    if "missing_values" in rec_by_type:
-        script_lines.append("    # Step 7: Semantic Missing value imputation")
-        for r in rec_by_type["missing_values"]:
-            col = r.get("column")
-            method = r.get("method", "")
-            if not col or col not in df.columns or "Drop" in method:
-                continue
-
-            # Entity / High-Cardinality text (e.g. director, actor, notes)
-            if "Unknown" in method or df[col].dtype == object and df[col].nunique() > 20:
-                has_col = f"has_{col}"
-                df[has_col] = df[col].notna().astype(float)
-                df[col] = df[col].fillna("Unknown")
-                applied_steps.append(f"Imputation: Filled missing in entity '{col}' with 'Unknown' & added indicator '{has_col}'.")
-                script_lines.append(f"    if '{col}' in df.columns:")
-                script_lines.append(f"        df['has_{col}'] = df['{col}'].notna().astype(float)")
-                script_lines.append(f"        df['{col}'] = df['{col}'].fillna('Unknown')")
-
-            elif pd.api.types.is_numeric_dtype(df[col]):
-                if "Median" in method:
-                    fill_val = float(df[col].median())
-                    df[col] = df[col].fillna(fill_val)
-                    applied_steps.append(f"Imputation: Replaced missing in '{col}' with Median ({round(fill_val, 2)}).")
-                    script_lines.append(f"    if '{col}' in df.columns: df['{col}'] = df['{col}'].fillna({round(fill_val, 4)})")
-                else:
-                    fill_val = float(df[col].mean())
-                    df[col] = df[col].fillna(fill_val)
-                    applied_steps.append(f"Imputation: Replaced missing in '{col}' with Mean ({round(fill_val, 2)}).")
-                    script_lines.append(f"    if '{col}' in df.columns: df['{col}'] = df['{col}'].fillna({round(fill_val, 4)})")
-            else:
-                # Mode for low-cardinality nominal category
-                mode_series = df[col].mode()
-                fill_val = mode_series.iloc[0] if not mode_series.empty else "Missing"
-                df[col] = df[col].fillna(fill_val)
-                applied_steps.append(f"Imputation: Replaced missing in '{col}' with Mode ('{fill_val}').")
-                script_lines.append(f"    if '{col}' in df.columns: df['{col}'] = df['{col}'].fillna('{fill_val}')")
-
-    # Safety pass for any residual missing cells
-    for col in df.columns:
-        if df[col].isna().sum() > 0:
-            if pd.api.types.is_numeric_dtype(df[col]):
-                df[col] = df[col].fillna(df[col].median() if not np.isnan(df[col].median()) else 0.0)
-            else:
-                df[col] = df[col].fillna("Unknown")
-
-    # -------------------------------------------------------------
-    # Step 8: High Cardinality Binning & Free-Text Cleanup
-    # -------------------------------------------------------------
-    script_lines.append("    # Step 8: Categorical cardinality binning & ID filtering")
-    for col in list(df.select_dtypes(include=['object', 'category']).columns):
-        if col == target_col:
+    # 4. Datetime feature extraction
+    for r in by_key.get("parse_datetime", []):
+        col = r["column"]
+        if not is_feature(col):
             continue
-        nunique = df[col].nunique()
-        # Drop unique ID or free-text prose columns (>50 categories or >40% uniqueness ratio)
-        if nunique > 50 or (len(df) > 50 and (nunique / len(df)) > 0.40):
-            df = df.drop(columns=[col])
-            applied_steps.append(f"Dimensionality: Dropped non-predictive high-cardinality column '{col}' ({nunique} unique).")
-            script_lines.append(f"    if '{col}' in df.columns: df = df.drop(columns=['{col}'])")
-        elif nunique > 10:
-            top_10 = df[col].value_counts().head(10).index.tolist()
-            df[col] = df[col].apply(lambda x: str(x) if x in top_10 else "Other")
-            applied_steps.append(f"Encoding: Grouped categories in '{col}' into Top 10 + 'Other'.")
-            script_lines.append(f"    if '{col}' in df.columns:")
-            script_lines.append(f"        top_10 = {top_10}")
-            script_lines.append(f"        df['{col}'] = df['{col}'].apply(lambda x: str(x) if x in top_10 else 'Other')")
+        parsed = T.parse_dates(df[col])
+        fill_year = _finite_or(parsed.dt.year.median(), 2000.0)
+        fill_month = _finite_or(parsed.dt.month.median(), 6.0)
+        fill_day = _finite_or(parsed.dt.day.median(), 15.0)
+        apply("extract_datetime",
+              f"Datetime Engineering: Parsed '{col}' into '{col}_year', '{col}_month' and '{col}_day'.",
+              column=col, fill_year=round(fill_year), fill_month=round(fill_month), fill_day=round(fill_day))
 
-    # -------------------------------------------------------------
-    # Step 9: Outlier Winsorization / Capping (Excluding Year/Age ranges)
-    # -------------------------------------------------------------
-    if "statistical_outliers" in rec_by_type:
-        script_lines.append("    # Step 9: Outlier Winsorization / Capping")
-        for r in rec_by_type["statistical_outliers"]:
-            col = r.get("column")
-            stats = r.get("stats_context", {})
-            if col and col in df.columns and col != target_col and pd.api.types.is_numeric_dtype(df[col]):
-                # Do NOT clip year columns (e.g. release_year)
-                if "year" in str(col).lower():
+    # 5. Mixed value + unit strings
+    for r in by_key.get("split_units", []):
+        col = r["column"]
+        if not is_feature(col):
+            continue
+        values = pd.Series([T.parse_unit(v)[0] for v in df[col]], dtype=float)
+        fill_value = _finite_or(values.median(), 0.0)
+        apply("split_units",
+              f"Unit Disentanglement: Parsed '{col}' into numeric '{col}_value' and categorical '{col}_unit'.",
+              column=col, fill_value=fill_value)
+
+    # 6. Delimited multi-label lists
+    for r in by_key.get("multi_hot", []):
+        col = r["column"]
+        if not is_feature(col):
+            continue
+        all_tokens = [t for cell in df[col] for t in T.split_tokens(cell)]
+        tokens = pd.Series(all_tokens, dtype=object).value_counts().head(MAX_MULTI_HOT_TOKENS).index.tolist()
+        apply("multi_hot", f"Multi-Label Encoding: Tokenized '{col}' into {len(tokens)} binary tag indicators.",
+              column=col, tokens=[str(t) for t in tokens])
+
+    # 7. Invalid negative values -> median of valid values
+    for r in by_key.get("replace_negatives_median", []):
+        col = r["column"]
+        if not is_feature(col) or not pd.api.types.is_numeric_dtype(df[col]):
+            continue
+        valid = df[col][df[col] >= 0]
+        fill_value = _finite_or(valid.median(), 0.0)
+        n_neg = int((df[col] < 0).sum())
+        if n_neg:
+            apply("replace_negatives",
+                  f"Domain Validity: Replaced {n_neg} negative values in '{col}' with the valid median ({round(fill_value, 3)}).",
+                  column=col, fill_value=fill_value)
+
+    # 8. Column drops
+    drop_reasons = {
+        "drop_constant": "zero variance",
+        "drop_collinear": "redundant / collinear",
+        "drop_column_missing": "over 70% missing",
+        "drop_high_cardinality": "high-cardinality free text",
+    }
+    informative_keys = {"drop_collinear", "drop_column_missing"}
+    dropped_informative: List[str] = []
+    for key, reason in drop_reasons.items():
+        cols = [r["column"] for r in by_key.get(key, []) if is_feature(r["column"])]
+        cols = list(dict.fromkeys(cols))
+        if cols:
+            apply("drop_columns", f"Dimensionality: Dropped {reason} column(s): {', '.join(cols)}.", columns=cols)
+            if key in informative_keys:
+                dropped_informative.extend(cols)
+
+    # 9. Outlier capping (before imputation so fill statistics are not skewed by extremes)
+    for r in by_key.get("cap_outliers", []):
+        col = r["column"]
+        params = r.get("params") or {}
+        if not is_feature(col) or not pd.api.types.is_numeric_dtype(df[col]):
+            continue
+        lb = _finite_or(params.get("lower_bound"), float(df[col].quantile(0.01)))
+        ub = _finite_or(params.get("upper_bound"), float(df[col].quantile(0.99)))
+        apply("clip_values", f"Outlier Capping: Winsorized '{col}' to [{lb}, {ub}].", column=col, lower=lb, upper=ub)
+
+    # 10. Missing value imputation (method chosen by column type in the rule matrix)
+    for key in ("impute_median", "impute_mean", "impute_mode", "impute_unknown"):
+        for r in by_key.get(key, []):
+            col = r["column"]
+            if not is_feature(col) or not df[col].isna().any():
+                continue
+            series = df[col]
+            numeric = pd.api.types.is_numeric_dtype(series)
+            if key in ("impute_median", "impute_mean") and numeric:
+                stat = series.median() if key == "impute_median" else series.mean()
+                label = "Median" if key == "impute_median" else "Mean"
+                if pd.isna(stat):
                     continue
-                lb = float(stats.get("lower_bound", df[col].quantile(0.01)))
-                ub = float(stats.get("upper_bound", df[col].quantile(0.99)))
-                df[col] = df[col].clip(lower=lb, upper=ub)
-                applied_steps.append(f"Outlier Capping: Winsorized '{col}' bounds to [{lb}, {ub}].")
-                script_lines.append(f"    if '{col}' in df.columns: df['{col}'] = df['{col}'].clip(lower={lb}, upper={ub})")
+                apply("fill_missing", f"Imputation: Replaced missing in '{col}' with {label} ({round(float(stat), 3)}).",
+                      column=col, value=float(stat))
+            elif key == "impute_unknown" and not numeric:
+                apply("fill_missing", f"Imputation: Filled missing in '{col}' with 'Unknown' & added indicator 'has_{col}'.",
+                      column=col, value="Unknown", add_flag=True)
+            else:
+                mode = series.mode()
+                if mode.empty:
+                    continue
+                value = mode.iloc[0]
+                apply("fill_missing", f"Imputation: Replaced missing in '{col}' with Mode ({value!r}).", column=col, value=value)
 
-    # -------------------------------------------------------------
-    # Step 10: Categorical One-Hot Encoding
-    # -------------------------------------------------------------
-    cat_cols = [c for c in df.select_dtypes(include=['object', 'category']).columns if c != target_col]
-    if cat_cols:
-        script_lines.append("    # Step 10: One-Hot Encoding")
-        df = pd.get_dummies(df, columns=cat_cols, drop_first=True, dtype=float)
-        applied_steps.append(f"Encoding: Applied One-Hot Encoding to categorical features: {', '.join(cat_cols)}.")
-        script_lines.append(f"    df = pd.get_dummies(df, columns={cat_cols}, drop_first=True, dtype=float)")
+    # 11. Rare category grouping
+    for r in by_key.get("group_rare", []):
+        col = r["column"]
+        if not is_feature(col):
+            continue
+        keep_n = int((r.get("params") or {}).get("keep_top", 10))
+        keep = [str(v) for v in df[col].dropna().astype(str).value_counts().head(keep_n).index.tolist()]
+        apply("group_rare", f"Encoding: Grouped categories in '{col}' into Top {len(keep)} + 'Other'.", column=col, keep=keep)
 
-    # -------------------------------------------------------------
-    # Step 11: Standard Feature Scaling (Numeric Features)
-    # -------------------------------------------------------------
-    num_feature_cols = [c for c in df.select_dtypes(include=[np.number]).columns if c != target_col]
-    if num_feature_cols:
-        script_lines.append("    # Step 11: Standard Feature Scaling")
-        scaler = StandardScaler()
-        df[num_feature_cols] = scaler.fit_transform(df[num_feature_cols])
-        applied_steps.append(f"Scaling: Standardized {len(num_feature_cols)} numeric features using StandardScaler.")
-        script_lines.append("    scaler = StandardScaler()")
-        script_lines.append(f"    df[{num_feature_cols}] = scaler.fit_transform(df[{num_feature_cols}])")
+    df_cleaned = df.copy()
 
-    # -------------------------------------------------------------
-    # Step 12: Target Resampling (SMOTE if Classification)
-    # -------------------------------------------------------------
-    if "class_imbalance" in rec_by_type and problem_type == "classification" and target_col and target_col in df.columns:
-        for r in rec_by_type["class_imbalance"]:
-            if "SMOTE" in r.get("method", ""):
-                try:
-                    from imblearn.over_sampling import SMOTE
-                    X = df.drop(columns=[target_col])
-                    y = df[target_col]
-                    min_class_count = int(y.value_counts().min())
-                    if min_class_count > 2 and len(X.columns) <= 100:
-                        k_neigh = min(5, min_class_count - 1)
-                        smote = SMOTE(k_neighbors=k_neigh, random_state=42)
-                        X_res, y_res = smote.fit_resample(X, y)
-                        df = pd.concat([pd.DataFrame(X_res, columns=X.columns), pd.Series(y_res, name=target_col)], axis=1)
-                        applied_steps.append(f"Resampling: Applied SMOTE oversampling on target '{target_col}'.")
-                        script_lines.append("    # Step 12: SMOTE target resampling")
-                        script_lines.append("    from imblearn.over_sampling import SMOTE")
-                        script_lines.append(f"    X, y = df.drop(columns=['{target_col}']), df['{target_col}']")
-                        script_lines.append(f"    df_res, y_res = SMOTE(k_neighbors={k_neigh}, random_state=42).fit_resample(X, y)")
-                        script_lines.append(f"    df = pd.concat([pd.DataFrame(df_res, columns=X.columns), pd.Series(y_res, name='{target_col}')], axis=1)")
-                except Exception:
-                    pass
+    # 12. One-hot encoding of remaining categorical features
+    if by_key.get("one_hot_encode"):
+        cat_cols = [c for c in df.columns if c != target_col and not pd.api.types.is_numeric_dtype(df[c])]
+        encoded, skipped = [], []
+        for col in cat_cols:
+            counts = df[col].dropna().astype(str).value_counts()
+            if len(counts) > MAX_ONE_HOT_CATEGORIES:
+                skipped.append(col)
+                continue
+            categories = sorted(counts.index.tolist())
+            baseline = counts.index[0] if len(counts) else None
+            indicator_cats = [c for c in categories if c != baseline]
+            apply("one_hot", f"Encoding: One-hot encoded '{col}' ({len(indicator_cats)} indicators, baseline '{baseline}').",
+                  column=col, categories=indicator_cats)
+            encoded.append(col)
+        if skipped:
+            steps.append(f"Encoding: Left {', '.join(skipped)} as text (more than {MAX_ONE_HOT_CATEGORIES} categories).")
 
-    script_lines.append("    return df")
-    script_lines.append("")
-    script_lines.append("# Run clean pipeline on raw dataset")
-    script_lines.append("# cleaned_df = clean_data(pd.read_csv('your_raw_dataset.csv'))")
-
-    script_code = "\n".join(script_lines)
-    return df, applied_steps, script_code
+    return PipelineResult(
+        df_cleaned=df_cleaned,
+        df_model_ready=df,
+        applied_steps=steps,
+        script_code=_build_script(ops),
+        dropped_informative_columns=dropped_informative,
+    )

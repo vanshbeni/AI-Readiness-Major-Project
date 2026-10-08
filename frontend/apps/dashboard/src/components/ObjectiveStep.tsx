@@ -1,190 +1,189 @@
-import React, { useState } from 'react';
-import { Layers, TrendingUp, Sparkles, ArrowRight, Loader2, Table } from 'lucide-react';
-import { DatasetSummary, DatasetSample } from '../services/api';
+import React, { useEffect, useState } from 'react';
+import { ArrowRight, Check, Loader2, Layers, TrendingUp } from 'lucide-react';
+import { api, DatasetSummary, DatasetSample, Objective, TargetSuggestion } from '../services/api';
+import { Eyebrow, MagneticButton, Note, Panel, Reveal, Scramble, Underlined } from './ui';
 
 interface ObjectiveStepProps {
   dataset: DatasetSummary;
   sample: DatasetSample;
+  initialObjective?: Objective | null;
   onSubmit: (problemType: string, targetColumn: string) => Promise<void>;
 }
 
-export const ObjectiveStep: React.FC<ObjectiveStepProps> = ({ dataset, sample, onSubmit }) => {
-  // Infer smart default target column
+const TARGET_NAME_HINTS = ['target', 'label', 'class', 'survived', 'churn', 'outcome', 'y', 'price', 'medianhousevalue'];
+
+const PROBLEM_TYPES = [
+  {
+    key: 'classification',
+    icon: Layers,
+    title: 'Classification',
+    body: 'Predict a category or yes/no outcome: churn vs retain, survived vs perished.',
+  },
+  {
+    key: 'regression',
+    icon: TrendingUp,
+    title: 'Regression',
+    body: 'Predict a continuous number: house price, temperature, revenue.',
+  },
+];
+
+export const ObjectiveStep: React.FC<ObjectiveStepProps> = ({ dataset, sample, initialObjective, onSubmit }) => {
   const cols = sample.columns;
-  const defaultTarget = cols.find(c => ['survived', 'churn', 'target', 'label', 'price', 'medianhousevalue', 'income', 'class', 'status'].includes(c.toLowerCase())) || cols[cols.length - 1];
-  
-  const [problemType, setProblemType] = useState<string>(
-    ['price', 'medianhousevalue', 'value', 'amount', 'salary'].some(k => defaultTarget.toLowerCase().includes(k))
-      ? 'regression'
-      : 'classification'
-  );
-  const [targetColumn, setTargetColumn] = useState<string>(defaultTarget);
+  const nameGuess = cols.find((c) => TARGET_NAME_HINTS.includes(c.toLowerCase())) || cols[cols.length - 1] || '';
+
+  const [suggestions, setSuggestions] = useState<Record<string, TargetSuggestion> | null>(null);
+  const [problemType, setProblemType] = useState<string>(initialObjective?.problem_type || 'classification');
+  const [targetColumn, setTargetColumn] = useState<string>(initialObjective?.target_column || nameGuess);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    api.getTargetSuggestions(dataset.id)
+      .then((s) => {
+        if (!active) return;
+        setSuggestions(s);
+        if (initialObjective) return;
+        const preferred = s[nameGuess]?.suitable ? nameGuess : [...cols].reverse().find((c) => s[c]?.suitable) || nameGuess;
+        setTargetColumn(preferred);
+        const pt = s[preferred]?.problem_type;
+        if (pt) setProblemType(pt);
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dataset.id]);
+
+  const handleTargetChange = (col: string) => {
+    setTargetColumn(col);
+    const pt = suggestions?.[col]?.problem_type;
+    if (pt) setProblemType(pt);
+  };
+
+  const suggestion = suggestions?.[targetColumn];
+  const warning = !suggestion
+    ? null
+    : !suggestion.suitable
+      ? `'${targetColumn}' looks unsuitable as a target (${suggestion.reason}).`
+      : suggestion.problem_type && suggestion.problem_type !== problemType
+        ? `'${targetColumn}' looks like a ${suggestion.problem_type} target (${suggestion.reason}).`
+        : null;
 
   const handleSubmit = async () => {
     setLoading(true);
     try {
       await onSubmit(problemType, targetColumn);
+    } catch {
+      // The page shows the error banner; just stop the spinner.
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div style={{ maxWidth: 850, margin: '1rem auto', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-      <div style={{ textAlign: 'center' }}>
-        <h2 style={{ fontSize: '2rem', fontWeight: 800, marginBottom: '0.5rem' }}>
-          Define Your <span className="gradient-text">ML Objective</span>
-        </h2>
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem' }}>
-          Select the supervised machine learning problem type and specify which column your models should predict.
+    <div className="step-enter" style={{ maxWidth: 980, margin: '0 auto' }}>
+      <div className="step-head">
+        <Eyebrow label="objective" index="02/05" caret />
+        <h1 className="h-title">
+          <Scramble text="What should it" /> <Underlined>predict?</Underlined>
+        </h1>
+        <p className="h-sub">
+          Pick the task and the column your models will learn. Every score and fix that follows is tuned to this choice.
         </p>
       </div>
 
-      <div className="glass-panel" style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
-        {/* Problem Type Cards */}
-        <div>
-          <label style={{ display: 'block', fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.75rem' }}>
-            1. Select Problem Type
-          </label>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-            <div
-              onClick={() => setProblemType('classification')}
-              style={{
-                padding: '1.25rem',
-                borderRadius: 12,
-                cursor: 'pointer',
-                background: problemType === 'classification' ? 'rgba(124, 58, 237, 0.05)' : '#fafbfc',
-                border: problemType === 'classification' ? '2px solid #7c3aed' : '1px solid var(--border)',
-                transition: 'all 0.2s ease',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.5rem' }}>
-                <Layers size={20} color={problemType === 'classification' ? '#7c3aed' : 'var(--text-dim)'} />
-                <h4 style={{ fontSize: '1rem', fontWeight: 700 }}>Classification</h4>
-              </div>
-              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                Predicting discrete categories or binary outcomes (e.g. Churn vs Retain, Survived vs Perished).
-              </p>
+      <div className="section-gap">
+        <Reveal>
+          <div className="field-label"><b>01</b> problem type</div>
+          <div className="choice-grid">
+            {PROBLEM_TYPES.map(({ key, icon: Icon, title, body }) => {
+              const on = problemType === key;
+              return (
+                <button key={key} type="button" className={`choice ${on ? 'on' : ''}`} onClick={() => setProblemType(key)} aria-pressed={on}>
+                  <span className="tick">{on && <Check size={11} color="#fff" strokeWidth={3} />}</span>
+                  <Icon size={20} color={on ? 'var(--accent)' : 'var(--dim)'} />
+                  <h4>{title}</h4>
+                  <p>{body}</p>
+                </button>
+              );
+            })}
+          </div>
+        </Reveal>
+
+        <Reveal delay={80}>
+          <div className="field-label" style={{ justifyContent: 'space-between' }}>
+            <span><b>02</b> target column</span>
+            {suggestion?.suitable && !warning && <span className="chip good">looks like a good target</span>}
+          </div>
+          <select className="select" value={targetColumn} onChange={(e) => handleTargetChange(e.target.value)}>
+            {cols.map((c) => (
+              <option key={c} value={c}>
+                {c}{suggestions?.[c] && !suggestions[c].suitable ? '  (not recommended)' : ''}
+              </option>
+            ))}
+          </select>
+          {warning && (
+            <div className="banner info" style={{ marginTop: '0.75rem', marginBottom: 0, borderColor: 'rgba(217,139,6,.35)', background: '#fffbf2' }}>
+              <span className="tag" style={{ color: 'var(--warn)' }}>[heads-up]</span>
+              <span>{warning}</span>
             </div>
+          )}
+        </Reveal>
 
-            <div
-              onClick={() => setProblemType('regression')}
-              style={{
-                padding: '1.25rem',
-                borderRadius: 12,
-                cursor: 'pointer',
-                background: problemType === 'regression' ? 'rgba(16, 185, 129, 0.05)' : '#fafbfc',
-                border: problemType === 'regression' ? '2px solid #10b981' : '1px solid var(--border)',
-                transition: 'all 0.2s ease',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.5rem' }}>
-                <TrendingUp size={20} color={problemType === 'regression' ? '#10b981' : 'var(--text-dim)'} />
-                <h4 style={{ fontSize: '1rem', fontWeight: 700 }}>Regression</h4>
+        <Reveal delay={140}>
+          <Panel>
+            <div className="panel-head">
+              <div className="left">
+                <span className="dots"><i /><i /><i /></span>
+                <span>~/{dataset.filename}</span>
               </div>
-              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                Predicting continuous numeric quantities (e.g. Housing Price, Temperature, Revenue).
-              </p>
+              <span>head(5) of {dataset.row_count.toLocaleString()} rows</span>
             </div>
-          </div>
-        </div>
-
-        {/* Target Column Selector */}
-        <div>
-          <label style={{ display: 'block', fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.75rem' }}>
-            2. Choose Target (Prediction) Column
-          </label>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-            <select
-              value={targetColumn}
-              onChange={(e) => setTargetColumn(e.target.value)}
-              style={{
-                flex: 1,
-                padding: '0.75rem 1rem',
-                borderRadius: 10,
-                background: '#ffffff',
-                border: '1px solid var(--border)',
-                color: 'var(--text-main)',
-                fontSize: '0.95rem',
-                fontWeight: 600,
-                outline: 'none',
-              }}
-            >
-              {cols.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-
-            <span className="badge badge-medium" style={{ height: 'fit-content' }}>
-              Target: {targetColumn}
-            </span>
-          </div>
-        </div>
-
-        {/* Dataset Preview Table */}
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.6rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-            <Table size={14} />
-            <span>Dataset Preview (Top 5 rows of {dataset.row_count} total):</span>
-          </div>
-          <div style={{ overflowX: 'auto', borderRadius: 8, border: '1px solid var(--border)' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem', textAlign: 'left' }}>
-              <thead>
-                <tr style={{ background: '#f8f9fb', borderBottom: '1px solid var(--border)' }}>
-                  {sample.columns.map((c) => (
-                    <th key={c} style={{
-                      padding: '0.5rem 0.75rem',
-                      fontWeight: 600,
-                      color: c === targetColumn ? '#7c3aed' : 'var(--text-muted)',
-                      background: c === targetColumn ? 'rgba(124, 58, 237, 0.04)' : 'transparent',
-                    }}>
-                      {c} {c === targetColumn && '★'}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {sample.sample_data.slice(0, 5).map((row, rIdx) => (
-                  <tr key={rIdx} style={{ borderBottom: '1px solid #f1f5f9' }}>
+            <div className="table-wrap">
+              <table className="mono-table">
+                <thead>
+                  <tr>
                     {sample.columns.map((c) => (
-                      <td key={c} style={{
-                        padding: '0.45rem 0.75rem',
-                        color: row[c] === null ? '#e11d48' : 'var(--text-main)',
-                        background: c === targetColumn ? 'rgba(124, 58, 237, 0.02)' : 'transparent',
-                      }}>
-                        {row[c] === null ? '<null>' : String(row[c])}
-                      </td>
+                      <th key={c} className={c === targetColumn ? 'hl' : ''}>
+                        {c}{c === targetColumn && ' ★'}
+                      </th>
                     ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+                </thead>
+                <tbody>
+                  {sample.sample_data.slice(0, 5).map((row, rIdx) => (
+                    <tr key={rIdx}>
+                      {sample.columns.map((c) => {
+                        const isNull = row[c] === null;
+                        return (
+                          <td key={c} className={isNull ? 'null' : c === targetColumn ? 'hl' : ''}>
+                            {isNull ? 'null' : String(row[c])}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
+        </Reveal>
 
-        {/* Run Diagnostic Button */}
-        <button
-          className="btn-primary"
-          onClick={handleSubmit}
-          disabled={loading}
-          style={{ width: '100%', padding: '0.9rem', fontSize: '1rem' }}
-        >
-          {loading ? (
-            <>
-              <Loader2 size={18} className="animate-spin" />
-              <span>Running Deep Profiling & Diagnostic Engine...</span>
-            </>
-          ) : (
-            <>
-              <Sparkles size={18} />
-              <span>Run AI Diagnostic & Compute Health Score</span>
-              <ArrowRight size={16} />
-            </>
-          )}
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '1.25rem', flexWrap: 'wrap' }}>
+          <Note tone="purple" rot={-4} delay={1.1}>takes a few seconds</Note>
+          <MagneticButton className="btn btn-dark btn-lg" onClick={handleSubmit} disabled={loading || !targetColumn}>
+            {loading ? (
+              <>
+                <Loader2 size={17} className="animate-spin" />
+                Profiling & scoring…
+              </>
+            ) : (
+              <>
+                Run diagnostics on <span className="mono" style={{ fontWeight: 500 }}>{targetColumn}</span>
+                <ArrowRight size={16} className="arrow" />
+              </>
+            )}
+          </MagneticButton>
+        </div>
       </div>
     </div>
   );

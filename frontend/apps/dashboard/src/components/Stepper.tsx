@@ -1,5 +1,5 @@
 import React from 'react';
-import { UploadCloud, Target, Activity, CheckSquare, Zap } from 'lucide-react';
+import { Check } from 'lucide-react';
 
 export type StepKey = 'upload' | 'objective' | 'diagnostic' | 'recommendations' | 'results';
 
@@ -9,76 +9,43 @@ interface StepperProps {
   completedSteps: StepKey[];
 }
 
-const STEPS: { key: StepKey; label: string; icon: React.ComponentType<{ size: number }> }[] = [
-  { key: 'upload', label: '1. Ingestion', icon: UploadCloud },
-  { key: 'objective', label: '2. ML Objective', icon: Target },
-  { key: 'diagnostic', label: '3. Data Health', icon: Activity },
-  { key: 'recommendations', label: '4. Explainable Fixes', icon: CheckSquare },
-  { key: 'results', label: '5. Cleaned & Models', icon: Zap },
+export const STEPS: { key: StepKey; label: string }[] = [
+  { key: 'upload', label: 'ingest' },
+  { key: 'objective', label: 'objective' },
+  { key: 'diagnostic', label: 'health score' },
+  { key: 'recommendations', label: 'approve fixes' },
+  { key: 'results', label: 'clean & benchmark' },
 ];
 
-export const Stepper: React.FC<StepperProps> = ({ currentStep, onStepClick, completedSteps }) => {
-  return (
-    <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: '0.75rem',
-      padding: '1.25rem 2rem',
-      maxWidth: 1000,
-      margin: '0 auto',
-    }}>
-      {STEPS.map((step, idx) => {
-        const Icon = step.icon;
-        const isActive = currentStep === step.key;
-        const isCompleted = completedSteps.includes(step.key);
-        const isClickable = isCompleted || isActive;
+export const stepIndex = (key: StepKey) => STEPS.findIndex((s) => s.key === key);
 
-        return (
-          <React.Fragment key={step.key}>
+export const Stepper: React.FC<StepperProps> = ({ currentStep, onStepClick, completedSteps }) => {
+  const activeIdx = stepIndex(currentStep);
+
+  return (
+    <nav className="stepper frame" aria-label="Progress">
+      <div className="stepper-track">
+        {STEPS.map((step, idx) => {
+          const isActive = currentStep === step.key;
+          const isDone = completedSteps.includes(step.key) && !isActive;
+          const clickable = isDone;
+          return (
             <button
-              onClick={() => isClickable && onStepClick?.(step.key)}
-              disabled={!isClickable}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                padding: '0.5rem 0.9rem',
-                borderRadius: 10,
-                background: isActive
-                  ? 'rgba(124, 58, 237, 0.08)'
-                  : isCompleted
-                  ? 'rgba(16, 185, 129, 0.06)'
-                  : 'transparent',
-                border: isActive
-                  ? '1px solid #7c3aed'
-                  : isCompleted
-                  ? '1px solid rgba(16, 185, 129, 0.3)'
-                  : '1px solid transparent',
-                color: isActive
-                  ? '#7c3aed'
-                  : isCompleted
-                  ? '#059669'
-                  : 'var(--text-dim)',
-                cursor: isClickable ? 'pointer' : 'not-allowed',
-                fontWeight: isActive ? 700 : 500,
-                fontSize: '0.85rem',
-                transition: 'all 0.2s ease',
-              }}
+              key={step.key}
+              type="button"
+              className={`step ${isActive ? 'active' : ''} ${isDone ? 'done' : ''}`}
+              onClick={() => clickable && onStepClick?.(step.key)}
+              disabled={!clickable && !isActive}
+              aria-current={isActive ? 'step' : undefined}
             >
-              <Icon size={16} />
-              <span>{step.label}</span>
+              <span className="n">{isDone ? <Check size={12} strokeWidth={3} /> : `0${idx + 1}`}</span>
+              <span className="label">{step.label}</span>
+              {isActive && <span className="caret" style={{ marginLeft: 'auto', height: 11, width: 6 }} />}
             </button>
-            {idx < STEPS.length - 1 && (
-              <div style={{
-                width: 24,
-                height: 1,
-                background: isCompleted ? 'rgba(16, 185, 129, 0.4)' : '#e2e8f0',
-              }} />
-            )}
-          </React.Fragment>
-        );
-      })}
-    </div>
+          );
+        })}
+        <span className="stepper-fill" style={{ width: `${((activeIdx + 1) / STEPS.length) * 100}%` }} />
+      </div>
+    </nav>
   );
 };

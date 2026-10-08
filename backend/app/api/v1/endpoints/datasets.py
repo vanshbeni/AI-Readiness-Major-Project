@@ -1,206 +1,265 @@
 import os
 import uuid
+from typing import List
+
 import numpy as np
 import pandas as pd
-from datetime import datetime
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status
 from sqlalchemy.orm import Session
-from app.core.database import get_db
+
+from app.api.deps import get_client_id, get_owned_dataset
 from app.core.config import settings
-from app.models.dataset import Dataset
-from app.schemas.dataset import DatasetResponse, DatasetSampleResponse
+from app.core.database import get_db
+from app.core.storage import (
+    SUPPORTED_EXTENSIONS,
+    DatasetParseError,
+    json_safe,
+    parse_uploaded_file,
+    read_dataset,
+    remove_files,
+    sanitize_filename,
+)
+from app.models.dataset import Dataset, DatasetSnapshot, HealthScore, Objective, ProcessingJob, ProfileReport, Recommendation
+from app.schemas.dataset import (
+    DatasetResponse,
+    DatasetSampleResponse,
+    DatasetSessionResponse,
+    ExecutionResponse,
+    FullDiagnosticResponse,
+    ModelBenchmarkLeaderboardResponse,
+    ObjectiveResponse,
+    RecommendationItem,
+)
 
 router = APIRouter()
 
 
-# Demo Dataset Generators
+def _titanic(rng: np.random.Generator) -> pd.DataFrame:
+    n = 300
+    pclass = rng.choice([1, 2, 3], n, p=[0.24, 0.21, 0.55])
+    sex = rng.choice(["male", "female"], n, p=[0.64, 0.36])
+    age = np.round(rng.normal(29, 14, n).clip(0.5, 80), 1)
+    age[rng.choice(n, 4, replace=False)] = -rng.integers(1, 10, 4)          # invalid negatives
+    age[rng.choice(n, 55, replace=False)] = np.nan                          # ~18% missing
+    fare = np.round(rng.exponential(14, n) + np.where(pclass == 1, 60, np.where(pclass == 2, 15, 5)), 2)
+    fare[rng.choice(n, 6, replace=False)] = rng.uniform(250, 520, 6)        # outliers
+    survive_p = 0.15 + 0.5 * (sex == "female") + 0.15 * (pclass == 1) - 0.05 * (pclass == 3)
+    cabin = np.where(rng.random(n) < 0.25, [f"C{rng.integers(1, 150)}" for _ in range(n)], None)
+    embarked = rng.choice(["S", "C", "Q"], n, p=[0.72, 0.19, 0.09]).astype(object)
+    embarked[rng.choice(n, 3, replace=False)] = None
+    df = pd.DataFrame({
+        "PassengerId": np.arange(1, n + 1),
+        "Survived": (rng.random(n) < survive_p.clip(0.02, 0.95)).astype(int),
+        "Pclass": pclass,
+        "Name": [f"Passenger {i}" for i in range(1, n + 1)],
+        "Sex": sex,
+        "Age": age,
+        "SibSp": rng.choice([0, 1, 2, 3, 4], n, p=[0.68, 0.23, 0.04, 0.03, 0.02]),
+        "Parch": rng.choice([0, 1, 2], n, p=[0.76, 0.14, 0.10]),
+        "Fare": fare,
+        "Cabin": cabin,
+        "Embarked": embarked,
+    })
+    return pd.concat([df, df.iloc[:4].assign(PassengerId=np.arange(n + 1, n + 5))], ignore_index=True)
+
+
+def _churn(rng: np.random.Generator) -> pd.DataFrame:
+    n = 300
+    tenure = rng.integers(0, 73, n)
+    monthly = np.round(rng.uniform(18, 118, n), 2)
+    total = np.round(tenure * monthly * rng.uniform(0.95, 1.05, n), 2)
+    total[rng.choice(n, 12, replace=False)] = np.nan
+    contract = rng.choice(["Month-to-month", "One year", "Two year"], n, p=[0.55, 0.25, 0.20])
+    score = -1.2 + 1.3 * (contract == "Month-to-month") - 0.035 * tenure + 0.01 * (monthly - 65)
+    churn_p = 1 / (1 + np.exp(-score))
+    churn = (rng.random(n) < churn_p * 0.6).astype(int)  # roughly 80:20
+    return pd.DataFrame({
+        "CustomerID": [f"CUST-{1000 + i}" for i in range(n)],
+        "Gender": rng.choice(["Male", "Female"], n),
+        "SeniorCitizen": rng.choice([0, 1], n, p=[0.84, 0.16]),
+        "Tenure": tenure,
+        "MonthlyCharges": monthly,
+        "TotalCharges": total,
+        "Contract": contract,
+        "PaymentMethod": rng.choice(["Electronic check", "Mailed check", "Bank transfer", "Credit card"], n),
+        "Churn": churn,
+    })
+
+
+def _housing(rng: np.random.Generator) -> pd.DataFrame:
+    n = 300
+    med_inc = np.round(rng.lognormal(1.3, 0.45, n), 4)
+    rooms = np.round(rng.normal(5.4, 1.1, n).clip(2, 12), 2)
+    rooms[rng.choice(n, 6, replace=False)] = rng.uniform(20, 40, 6)          # outliers
+    bedrooms = np.round(rooms * rng.normal(0.2, 0.01, n), 2)                 # collinear with rooms
+    bedrooms[rng.choice(n, 15, replace=False)] = np.nan
+    lat = np.round(rng.uniform(32.5, 41.9, n), 2)
+    value = np.round((med_inc * 42000 + rng.normal(0, 30000, n) + (lat < 36) * 25000).clip(15000, 500000), 0)
+    df = pd.DataFrame({
+        "MedInc": med_inc,
+        "HouseAge": rng.integers(1, 53, n).astype(float),
+        "AveRooms": rooms,
+        "AveBedrms": bedrooms,
+        "Population": rng.integers(100, 5000, n).astype(float),
+        "AveOccup": np.round(rng.normal(2.9, 0.7, n).clip(1, 8), 2),
+        "Latitude": lat,
+        "Longitude": np.round(rng.uniform(-124.3, -114.3, n), 2),
+        "MedianHouseValue": value,
+    })
+    return pd.concat([df, df.iloc[:5]], ignore_index=True)
+
+
 DEMO_DATASETS = {
-    "titanic": {
-        "filename": "titanic_passenger_survival.csv",
-        "default_target": "Survived",
-        "default_problem_type": "classification",
-        "generator": lambda: pd.DataFrame({
-            "PassengerId": range(1, 101),
-            "Survived": [0, 1, 1, 1, 0, 0, 0, 0, 1, 1] * 10,
-            "Pclass": [3, 1, 3, 1, 3, 3, 1, 3, 3, 2] * 10,
-            "Name": [f"Passenger {i}" for i in range(1, 101)],
-            "Sex": ["male", "female", "female", "female", "male", "male", "male", "male", "female", "female"] * 10,
-            "Age": [22.0, 38.0, 26.0, 35.0, -5.0, None, 54.0, 2.0, 27.0, 14.0] * 10,  # includes negative & missing
-            "SibSp": [1, 1, 0, 1, 0, 0, 0, 3, 0, 1] * 10,
-            "Parch": [0, 0, 0, 0, 0, 0, 0, 1, 2, 0] * 10,
-            "Fare": [7.25, 71.28, 7.92, 53.1, 8.05, 8.45, 512.3, 21.07, 11.13, 30.07] * 10,  # outlier 512.3
-            "Cabin": [None, "C85", None, "C123", None, None, "E46", None, None, None] * 10,  # high missing
-            "Embarked": ["S", "C", "S", "S", "S", "Q", "S", "S", "S", "C"] * 10,
-        })
-    },
-    "churn": {
-        "filename": "telco_customer_churn.csv",
-        "default_target": "Churn",
-        "default_problem_type": "classification",
-        "generator": lambda: pd.DataFrame({
-            "CustomerID": [f"CUST-{1000+i}" for i in range(100)],
-            "Gender": ["Male", "Female"] * 50,
-            "SeniorCitizen": [0, 0, 0, 1, 0, 0, 1, 0, 0, 0] * 10,
-            "Tenure": [1, 34, 2, 45, 8, 22, 10, 28, 62, 13] * 10,
-            "MonthlyCharges": [29.85, 56.95, 53.85, 42.30, 70.70, 99.65, 89.10, 29.75, 104.80, 56.15] * 10,
-            "TotalCharges": [29.85, 1889.5, 108.15, 1840.75, 151.65, None, 1949.4, 346.45, 3046.05, None] * 10,  # missing
-            "Contract": ["Month-to-month", "One year", "Month-to-month", "One year", "Month-to-month", "Two year", "Month-to-month", "Month-to-month", "Month-to-month", "Month-to-month"] * 10,
-            "PaymentMethod": ["Electronic check", "Mailed check", "Mailed check", "Bank transfer", "Electronic check", "Electronic check", "Credit card", "Mailed check", "Electronic check", "Mailed check"] * 10,
-            "Churn": [0, 0, 1, 0, 1, 1, 0, 0, 0, 1] * 10,  # class ratio
-        })
-    },
-    "housing": {
-        "filename": "california_housing_prices.csv",
-        "default_target": "MedianHouseValue",
-        "default_problem_type": "regression",
-        "generator": lambda: pd.DataFrame({
-            "MedInc": [8.3252, 8.3014, 7.2574, 5.6431, 3.8462, 4.0368, 3.6591, 3.1200, 2.0804, 3.6912] * 10,
-            "HouseAge": [41.0, 21.0, 52.0, 52.0, 52.0, 52.0, 52.0, 52.0, 42.0, 52.0] * 10,
-            "AveRooms": [6.98, 6.23, 8.28, 5.81, 6.28, 4.76, 4.93, 4.79, 4.29, 4.97] * 10,
-            "AveBedrms": [1.02, 0.97, 1.07, 1.07, 1.08, 1.10, 0.95, 1.06, 1.11, 1.03] * 10,
-            "Population": [322.0, 2401.0, 496.0, 558.0, 565.0, 413.0, 1094.0, 1157.0, 1206.0, 1551.0] * 10,
-            "AveOccup": [2.55, 2.10, 2.80, 2.54, 2.18, 2.13, 3.64, 1.78, 2.02, 2.17] * 10,
-            "Latitude": [37.88, 37.86, 37.85, 37.85, 37.85, 37.85, 37.84, 37.84, 37.84, 37.84] * 10,
-            "Longitude": [-122.23, -122.22, -122.24, -122.25, -122.25, -122.25, -122.25, -122.25, -122.26, -122.26] * 10,
-            "MedianHouseValue": [452600.0, 358500.0, 352100.0, 341300.0, 342200.0, 269700.0, 299200.0, 241400.0, 226700.0, 261100.0] * 10,
-        })
-    }
+    "titanic": {"filename": "titanic_passenger_survival.csv", "generator": lambda: _titanic(np.random.default_rng(7))},
+    "churn": {"filename": "telco_customer_churn.csv", "generator": lambda: _churn(np.random.default_rng(11))},
+    "housing": {"filename": "california_housing_prices.csv", "generator": lambda: _housing(np.random.default_rng(23))},
 }
 
 
+def build_dataset_response(db: Session, ds: Dataset, warnings: List[str] = None) -> DatasetResponse:
+    return DatasetResponse(
+        id=ds.id,
+        filename=ds.filename,
+        file_size_bytes=ds.file_size_bytes,
+        row_count=ds.row_count,
+        col_count=ds.col_count,
+        uploaded_at=ds.uploaded_at,
+        has_objective=db.query(Objective).filter(Objective.dataset_id == ds.id).count() > 0,
+        has_profile=db.query(ProfileReport).filter(ProfileReport.dataset_id == ds.id).count() > 0,
+        has_health_score=db.query(HealthScore).filter(HealthScore.dataset_id == ds.id, HealthScore.stage == "before").count() > 0,
+        has_cleaned_data=bool(ds.cleaned_file_path and os.path.exists(ds.cleaned_file_path)),
+        warnings=warnings or [],
+    )
+
+
+def build_sample(ds: Dataset) -> DatasetSampleResponse:
+    df = read_dataset(ds.raw_file_path, nrows=15)
+    records = json_safe(df.astype(object).where(pd.notnull(df), None).to_dict(orient="records"))
+    return DatasetSampleResponse(
+        id=ds.id,
+        filename=ds.filename,
+        total_rows=ds.row_count,
+        total_cols=ds.col_count,
+        columns=[str(c) for c in df.columns],
+        sample_data=records,
+    )
+
+
+def _store_dataset(db: Session, df: pd.DataFrame, filename: str, file_size: int, client_id: str, warnings: List[str]) -> DatasetResponse:
+    dataset_id = str(uuid.uuid4())
+    raw_path = os.path.join(settings.RAW_DATA_DIR, f"{dataset_id}.csv")
+    df.to_csv(raw_path, index=False)
+    try:
+        db_dataset = Dataset(
+            id=dataset_id,
+            owner_token=client_id,
+            filename=filename,
+            file_size_bytes=file_size,
+            raw_file_path=raw_path,
+            row_count=int(df.shape[0]),
+            col_count=int(df.shape[1]),
+        )
+        db.add(db_dataset)
+        db.commit()
+        db.refresh(db_dataset)
+    except Exception:
+        db.rollback()
+        remove_files(raw_path)
+        raise HTTPException(status_code=500, detail="Failed to save the dataset record. Please try again.")
+    return build_dataset_response(db, db_dataset, warnings)
+
+
 @router.post("/upload", response_model=DatasetResponse, status_code=status.HTTP_201_CREATED)
-async def upload_dataset(
+def upload_dataset(
     file: UploadFile = File(...),
+    client_id: str = Depends(get_client_id),
     db: Session = Depends(get_db),
 ):
-    """Uploads a CSV or Excel file and parses initial schema."""
-    filename = file.filename or "dataset.csv"
+    """Uploads a CSV or Excel file, validates it and stores a normalized copy."""
+    filename = sanitize_filename(file.filename)
     ext = os.path.splitext(filename)[1].lower()
-    if ext not in [".csv", ".xlsx", ".xls"]:
+    if ext not in SUPPORTED_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Only CSV and Excel (.xlsx, .xls) files are supported.")
 
-    dataset_id = str(uuid.uuid4())
-    raw_path = os.path.join(settings.RAW_DATA_DIR, f"{dataset_id}_{filename}")
+    max_bytes = settings.MAX_UPLOAD_MB * 1024 * 1024
+    content = file.file.read(max_bytes + 1)
+    if len(content) > max_bytes:
+        raise HTTPException(status_code=413, detail=f"File is larger than the {settings.MAX_UPLOAD_MB} MB limit.")
 
-    # Save uploaded file
     try:
-        content = await file.read()
-        file_size = len(content)
-        with open(raw_path, "wb") as f:
-            f.write(content)
+        df, warnings = parse_uploaded_file(content, ext)
+    except DatasetParseError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
-        # Parse DataFrame
-        if ext == ".csv":
-            df = pd.read_csv(raw_path)
-        else:
-            df = pd.read_excel(raw_path)
-
-    except Exception as e:
-        if os.path.exists(raw_path):
-            os.remove(raw_path)
-        raise HTTPException(status_code=400, detail=f"Failed to parse uploaded file: {str(e)}")
-
-    row_cnt, col_cnt = df.shape
-
-    # Create DB Record
-    db_dataset = Dataset(
-        id=dataset_id,
-        filename=filename,
-        file_size_bytes=file_size,
-        raw_file_path=raw_path,
-        row_count=row_cnt,
-        col_count=col_cnt,
-    )
-    db.add(db_dataset)
-    db.commit()
-    db.refresh(db_dataset)
-
-    return DatasetResponse(
-        id=db_dataset.id,
-        filename=db_dataset.filename,
-        file_size_bytes=db_dataset.file_size_bytes,
-        row_count=db_dataset.row_count,
-        col_count=db_dataset.col_count,
-        uploaded_at=db_dataset.uploaded_at,
-        has_objective=False,
-        has_profile=False,
-        has_health_score=False,
-        has_cleaned_data=False,
-    )
+    return _store_dataset(db, df, filename, len(content), client_id, warnings)
 
 
 @router.post("/demo/{demo_key}", response_model=DatasetResponse, status_code=status.HTTP_201_CREATED)
-async def load_demo_dataset(
+def load_demo_dataset(
     demo_key: str,
+    client_id: str = Depends(get_client_id),
     db: Session = Depends(get_db),
 ):
-    """Instantly loads a standard curated sample dataset (titanic, churn, housing)."""
+    """Loads a curated sample dataset (titanic, churn, housing)."""
     demo_key = demo_key.lower()
     if demo_key not in DEMO_DATASETS:
         raise HTTPException(status_code=404, detail=f"Demo dataset '{demo_key}' not found. Available: {list(DEMO_DATASETS.keys())}")
-
     config = DEMO_DATASETS[demo_key]
     df = config["generator"]()
-    dataset_id = str(uuid.uuid4())
-    filename = config["filename"]
-    raw_path = os.path.join(settings.RAW_DATA_DIR, f"{dataset_id}_{filename}")
-    
-    df.to_csv(raw_path, index=False)
-    file_size = os.path.getsize(raw_path)
-
-    db_dataset = Dataset(
-        id=dataset_id,
-        filename=filename,
-        file_size_bytes=file_size,
-        raw_file_path=raw_path,
-        row_count=len(df),
-        col_count=len(df.columns),
-    )
-    db.add(db_dataset)
-    db.commit()
-    db.refresh(db_dataset)
-
-    return DatasetResponse(
-        id=db_dataset.id,
-        filename=db_dataset.filename,
-        file_size_bytes=db_dataset.file_size_bytes,
-        row_count=db_dataset.row_count,
-        col_count=db_dataset.col_count,
-        uploaded_at=db_dataset.uploaded_at,
-        has_objective=False,
-        has_profile=False,
-        has_health_score=False,
-        has_cleaned_data=False,
-    )
+    size = len(df.to_csv(index=False).encode("utf-8"))
+    return _store_dataset(db, df, config["filename"], size, client_id, [])
 
 
 @router.get("/{dataset_id}/sample", response_model=DatasetSampleResponse)
-async def get_dataset_sample(
-    dataset_id: str,
+def get_dataset_sample(db_dataset: Dataset = Depends(get_owned_dataset)):
+    """Retrieves preview sample rows from the raw dataset."""
+    return build_sample(db_dataset)
+
+
+@router.get("/{dataset_id}/session", response_model=DatasetSessionResponse)
+def get_dataset_session(
+    db_dataset: Dataset = Depends(get_owned_dataset),
     db: Session = Depends(get_db),
 ):
-    """Retrieves preview sample rows from the raw dataset."""
-    db_dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
-    if not db_dataset:
-        raise HTTPException(status_code=404, detail="Dataset not found.")
+    """Returns everything needed to restore the UI for a dataset after a page refresh."""
+    obj = db.query(Objective).filter(Objective.dataset_id == db_dataset.id).first()
+    snap = db.query(DatasetSnapshot).filter(DatasetSnapshot.dataset_id == db_dataset.id).first()
 
-    if not os.path.exists(db_dataset.raw_file_path):
-        raise HTTPException(status_code=404, detail="Raw dataset file not found on disk.")
+    diagnostics = execution = leaderboard = None
+    if snap and snap.diagnostics:
+        diagnostics = FullDiagnosticResponse.model_validate(snap.diagnostics)
+        recs = db.query(Recommendation).filter(Recommendation.dataset_id == db_dataset.id).all()
+        diagnostics.recommendations = [RecommendationItem.model_validate(r) for r in recs]
+        diagnostics.dataset = build_dataset_response(db, db_dataset)
+    if snap and snap.execution:
+        execution = ExecutionResponse.model_validate(snap.execution)
+    if snap and snap.leaderboard:
+        leaderboard = ModelBenchmarkLeaderboardResponse.model_validate(snap.leaderboard)
 
-    ext = os.path.splitext(db_dataset.raw_file_path)[1].lower()
-    if ext == ".csv":
-        df = pd.read_csv(db_dataset.raw_file_path, nrows=15)
-    else:
-        df = pd.read_excel(db_dataset.raw_file_path, nrows=15)
-
-    # Sanitize NaN values for clean JSON serialization
-    sample_records = df.where(pd.notnull(df), None).to_dict(orient="records")
-
-    return DatasetSampleResponse(
-        id=db_dataset.id,
-        filename=db_dataset.filename,
-        total_rows=db_dataset.row_count,
-        total_cols=db_dataset.col_count,
-        columns=list(df.columns),
-        sample_data=sample_records,
+    return DatasetSessionResponse(
+        dataset=build_dataset_response(db, db_dataset),
+        sample=build_sample(db_dataset),
+        objective=ObjectiveResponse.model_validate(obj) if obj else None,
+        diagnostics=diagnostics,
+        execution=execution,
+        leaderboard=leaderboard,
     )
+
+
+@router.delete("/{dataset_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_dataset(
+    dataset_id: str,
+    client_id: str = Depends(get_client_id),
+    db: Session = Depends(get_db),
+):
+    """Deletes a dataset, all derived records and all stored files."""
+    db_dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if not db_dataset or (db_dataset.owner_token and db_dataset.owner_token != client_id):
+        raise HTTPException(status_code=404, detail="Dataset not found.")
+    jobs = db.query(ProcessingJob).filter(ProcessingJob.dataset_id == dataset_id).all()
+    files = [db_dataset.raw_file_path, db_dataset.cleaned_file_path]
+    files += [p for j in jobs for p in (j.script_file_path, j.report_file_path)]
+    db.delete(db_dataset)
+    db.commit()
+    remove_files(*files)
+    remove_files(os.path.join(settings.ARTIFACTS_DIR, f"{dataset_id}_audit_report.pdf"))
