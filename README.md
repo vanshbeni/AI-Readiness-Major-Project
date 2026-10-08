@@ -1,389 +1,961 @@
-# 🛡️ AI Data Readiness Platform (AegisMind Engine)
+# Nebulus — Architecture & System Walkthrough
 
-> **An Explainable Pre-Machine Learning Diagnostic, Automated Remediation & Model Benchmarking Platform**  
-> *Bridging the critical gap between raw, messy data and robust, production-grade machine learning models.*
-
----
-
-## 📑 Table of Contents
-
-1. [Executive Overview](#-executive-overview)
-2. [End-to-End System Architecture & Execution Lifecycle](#-end-to-end-system-architecture--execution-lifecycle)
-3. [Mathematical Foundations & 0–100 Data Health Score](#-mathematical-foundations--0100-data-health-score)
-4. [Diagnostic & Quality Detection Suite](#-diagnostic--quality-detection-suite)
-5. [3-Stage Explainable AI Recommendation Engine](#-3-stage-explainable-ai-recommendation-engine)
-6. [Safe-Order 12-Step Transformation Execution Engine](#-safe-order-12-step-transformation-execution-engine)
-7. [Cross-Validation & Model Benchmarking Engine](#-cross-validation--model-benchmarking-engine)
-8. [Export Hub & Reproducible Artifact Generation](#-export-hub--reproducible-artifact-generation)
-9. [Project Directory & File Structure](#-project-directory--file-structure)
-10. [REST API Data Contracts & Endpoint Reference](#-rest-api-data-contracts--endpoint-reference)
-11. [Installation & Local Setup Guide](#-installation--local-setup-guide)
+> **Nebulus** is an explainable pre-ML data readiness platform. A user uploads a tabular dataset (CSV / Excel),
+> picks what they want to predict, and Nebulus profiles the data, scores it 0–100, recommends fixes with
+> plain-English explanations, applies only the fixes the user approves, re-scores the result, benchmarks ML models
+> honestly, and exports a cleaned dataset, a reproducible Python script, a PDF audit report and a JSON manifest.
 
 ---
 
-## 📌 Executive Overview
+## Table of Contents
 
-Most modern AutoML frameworks attempt to solve: **"Which algorithm or hyperparameter configuration gives the highest test accuracy?"**
-
-However, in real-world data science, **garbage in equals garbage out**. Real datasets suffer from missingness, exact duplicate rows, extreme outliers, unparsed datetime strings, mixed measurement units, severe class imbalance, high-cardinality IDs, and multicollinearity. 
-
-The **AI Data Readiness Platform** solves the prerequisite question:  
-👉 **"Is this dataset statistically viable for machine learning, what specific defects exist, why do they matter, and how can we safely transform it?"**
-
-### Core Principles
-* **100% Explainable & Grounded:** Every recommendation is computed with statistical heuristics and justified using LLM explanations (Gemini / OpenAI) with deterministic fallback templates.
-* **Human-in-the-Loop Governance:** Destructive operations (dropping columns, dropping rows) are never executed without explicit user opt-in.
-* **Mathematical Sequence Integrity:** Transformations run in a mathematically safe order to avoid data leakage and distorted statistics.
-* **Full Pipeline Reproducibility:** Generates standalone Python/Scikit-Learn pipeline scripts, executive PDF audit reports, and model-ready cleaned CSVs.
-
----
-
-## 🏗️ End-to-End System Architecture & Execution Lifecycle
-
-```mermaid
-flowchart TD
-    A["Raw Dataset Upload (.csv / .xlsx)"] --> B["Automated Type Profiling & Schema Inference"]
-    B --> C["User Defines Objective (Target Column + Problem Type)"]
-    C --> D["Comprehensive Diagnostic Profiling & Quality Scan"]
-    D --> E["Mathematical 0–100 Data Health Score Calculation"]
-    D --> F["3-Stage Explainable Remediation Engine (Stats -> Rules -> LLM Justifications)"]
-    E & F --> G["Interactive Diagnostic Dashboard & Approval Checklist"]
-    G -->|User Toggles & Approves Fixes| H["12-Step Safe-Order Transformation Execution Pipeline"]
-    H --> I["Post-Cleaning Health Score & Before/After Metric Diff Calculation"]
-    H --> J["3-Fold Cross-Validated ML Model Leaderboard Benchmarking"]
-    H --> K["Artifact Generation Hub (Cleaned CSV, Python Script, PDF Audit, JSON Manifest)"]
-```
-
----
-
-## 🧮 Mathematical Foundations & 0–100 Data Health Score
-
-The platform computes a **0–100 composite Data Health Score** ($S_{\text{composite}}$) along with 6 individual sub-scores that quantify data readiness.
-
-```math
-S_{\text{composite}} = \sum_{i=1}^{6} w_i \cdot S_i
-$$
-```
-
-Where the weights $w_i$ and sub-scores $S_i$ are mathematically defined as follows:
-
-| Sub-Score Dimension ($S_i$) | Weight ($w_i$) | Mathematical Formula & Penalties | Thresholds & Risk Criteria |
-| :--- | :---: | :--- | :--- |
-| **1. Missingness Score** | **25%** ($0.25$) | $S_{\text{miss}} = \max\left(0, 100 - (\text{overall\_missing\_pct} \times 2.5)\right)$ | Penalizes total missing values. $>40\%$ missing reduces sub-score to $0$. |
-| **2. Duplication Score** | **15%** ($0.15$) | $S_{\text{dup}} = \max\left(0, 100 - (\text{duplicate\_rows\_pct} \times 5.0)\right)$ | $>20\%$ duplicate rows reduces sub-score to $0$ to prevent severe train-test leakage. |
-| **3. Outlier Score** | **15%** ($0.15$) | $S_{\text{out}} = \max\left(0, 100 - (\overline{\text{outlier\_pct}} \times 3.0 + N_{\text{outlier\_cols}} \times 4.0)\right)$ | Evaluates percentage of extreme points beyond $1.5 \times \text{IQR}$ across numeric columns. |
-| **4. Domain Validity Score** | **15%** ($0.15$) | $S_{\text{val}} = \max\left(0, 100 - (N_{\text{invalid\_cols}} \times 20.0)\right)$ | Penalizes negative values in strictly non-negative columns (age, salary, price, count). |
-| **5. Target Balance Score** | **15%** ($0.15$) | $S_{\text{bal}} = \max\left(0, 100 - (\text{majority\_ratio} - 0.5) \times 160.0\right)$ | For classification: $50:50 \rightarrow 100$, $95:5 \rightarrow 28$, $100:0 \rightarrow 20$. Defaults to $100.0$ for regression. |
-| **6. Feature Quality Score** | **15%** ($0.15$) | $S_{\text{feat}} = \max\left(0, 100 - (N_{\text{collinear\_pairs}} \times 10.0 + N_{\text{constant\_cols}} \times 15.0)\right)$ | Penalizes features with Pearson correlation $\|r\| > 0.85$ or near-zero variance ($\sigma^2 = 0$). |
-
-### Letter Grade Classifications
-* **`A (90–100)` — Excellent Readiness:** Data is model-ready with negligible defects.
-* **`B (80–89.9)` — Good Readiness:** Minor missingness or mild outliers present; standard pipelines will converge.
-* **`C (70–79.9)` — Fair (Needs Cleaning):** Moderate data quality defects that risk degrading gradient steps or accuracy.
-* **`D (60–69.9)` — Poor (High Risk):** Significant data leaks, heavy duplication, or severe multicollinearity.
-* **`F (<60)` — Critical Quality Defects:** Unusable without structural remediation.
+1. [High-Level Overview](#1-high-level-overview)
+2. [Repository Layout](#2-repository-layout)
+3. [Technology Stack](#3-technology-stack)
+4. [End-to-End User Flow](#4-end-to-end-user-flow)
+5. [Backend Architecture](#5-backend-architecture)
+   - 5.1 [Application Bootstrap](#51-application-bootstrap)
+   - 5.2 [Configuration](#52-configuration)
+   - 5.3 [Database Layer](#53-database-layer)
+   - 5.4 [Data Model (ER Diagram)](#54-data-model)
+   - 5.5 [Ownership, Locking & Invalidation](#55-ownership-locking--invalidation)
+   - 5.6 [File Storage & Ingestion](#56-file-storage--ingestion)
+   - 5.7 [REST API Reference](#57-rest-api-reference)
+6. [The Engine (Core Intelligence)](#6-the-engine-core-intelligence)
+   - 6.1 [Profiler](#61-profiler--profilerpy)
+   - 6.2 [Detector](#62-detector--detectorpy)
+   - 6.3 [Scorer](#63-scorer--scorerpy)
+   - 6.4 [Rules Engine](#64-rules-engine--rulespy)
+   - 6.5 [Explainer (Gemini + Fallback)](#65-explainer--explainerpy)
+   - 6.6 [Transforms](#66-transforms--transformspy)
+   - 6.7 [Executor](#67-executor--executorpy)
+   - 6.8 [Benchmark](#68-benchmark--benchmarkpy)
+   - 6.9 [Reporter](#69-reporter--reporterpy)
+7. [Frontend Architecture](#7-frontend-architecture)
+   - 7.1 [Monorepo](#71-monorepo)
+   - 7.2 [Dashboard App](#72-dashboard-app-port-3000)
+   - 7.3 [Landing App](#73-landing-app-port-3001)
+8. [Request Lifecycles (Sequence Diagrams)](#8-request-lifecycles)
+9. [State Machine & Invalidation Rules](#9-state-machine--invalidation-rules)
+10. [Error Handling Strategy](#10-error-handling-strategy)
+11. [Security Model](#11-security-model)
+12. [Running the Project](#12-running-the-project)
+13. [Testing & Verification](#13-testing--verification)
+14. [Known Limitations & Future Work](#14-known-limitations--future-work)
 
 ---
 
-## 🔍 Diagnostic & Quality Detection Suite
-
-The detector module ([`detector.py`](file:///c:/Users/Arif%20Choudhary/OneDrive/Desktop/Major%20project/backend/app/engine/detector.py)) runs a multi-pass statistical scan:
-
-### 1. Inferred Column Type Classification
-Each column is dynamically categorized into one of 6 semantic types:
-* **`numeric`**: Float or integer series with $>10$ unique numeric values.
-* **`categorical`**: Strings or low-cardinality integers ($\le 20$ unique categories).
-* **`boolean`**: Binary values (`{0, 1}`, `{'True', 'False'}`, `{'Yes', 'No'}`).
-* **`datetime`**: Dates matching standard ISO, timestamp, or slash formats.
-* **`id`**: Unique identifier columns (cardinality ratio $>0.98$ on string/integer series).
-* **`text`**: High-cardinality natural language or unformatted token sequences.
-
-### 2. Detection Algorithms & Heuristics
-
-* **Missing Values**:
-  * $\text{Missing Pct} > 50\%$ $\rightarrow$ Severity: **Critical** (Suggests feature elimination).
-  * $20\% < \text{Missing Pct} \le 50\%$ $\rightarrow$ Severity: **High** (Suggests advanced imputation or indicator flag).
-  * $0\% < \text{Missing Pct} \le 20\%$ $\rightarrow$ Severity: **Medium** (Suggests median/mode imputation).
-* **Exact Duplicate Rows**:
-  * Computes exact hash equality across all features using Pandas `df.duplicated()`.
-* **Statistical Outliers (Tukey's Fences)**:
-  * Lower Bound: $Q_1 - 1.5 \times \text{IQR}$
-  * Upper Bound: $Q_3 + 1.5 \times \text{IQR}$
-  * *Smart Filtering:* Skips columns representing calendar years, IDs, or columns with skewness $\approx 0$.
-* **Domain Validity & Mixed Units**:
-  * Detects negative numbers in non-negative keyword columns (`age`, `salary`, `income`, `price`, `cost`, `revenue`, `distance`, `fare`, `tenure`).
-  * Detects mixed unit strings (e.g. `"90 min"`, `"2 Seasons"`, `"120 km/h"`).
-* **Multicollinearity**:
-  * Computes the Pearson Correlation Matrix $R$. Any pair $(X_i, X_j)$ where $\|r_{ij}\| > 0.85$ triggers a collinearity warning.
-* **Class Imbalance**:
-  * For classification targets, computes the majority class percentage. Flags imbalances exceeding $70\%:30\%$.
-
----
-
-## 🧠 3-Stage Explainable AI Recommendation Engine
+## 1. High-Level Overview
 
 ```mermaid
 flowchart LR
-    S1["Stage 1: Deterministic Statistical Profile Extraction"] --> S2["Stage 2: Heuristic Rule Mapping (Action & Method)"]
-    S2 --> S3["Stage 3: LLM Plain-Language Justification (Gemini / OpenAI)"]
-    S3 --> S4["Explainable Recommendation Card"]
+    subgraph Browser
+        L[Landing App<br/>Next.js :3001]
+        D[Dashboard App<br/>Next.js :3000]
+    end
+
+    subgraph Backend["FastAPI Backend :8000"]
+        API[REST API<br/>/api/v1]
+        ENG[Engine<br/>profiler · detector · scorer · rules<br/>explainer · executor · benchmark · reporter]
+        STORE[Storage helpers<br/>parse · lock · cleanup]
+    end
+
+    DB[(SQL Database<br/>SQLite or PostgreSQL)]
+    FS[(Local file storage<br/>uploads/raw · cleaned · artifacts)]
+    GEM[Google Gemini API]
+
+    L -- "Open Dashboard link" --> D
+    D -- "fetch + X-Client-Id header" --> API
+    API --> ENG
+    API --> STORE
+    API <--> DB
+    STORE <--> FS
+    ENG -- "explanations (optional)" --> GEM
 ```
 
-### Stage 1: Deterministic Statistical Profiling
-Gathers raw column metrics: distribution skewness $\gamma_1$, missingness percentage, cardinality, variance, min, max, and correlation.
+**Design principles**
 
-### Stage 2: Heuristic Rule Mapping ([`rules.py`](file:///c:/Users/Arif%20Choudhary/OneDrive/Desktop/Major%20project/backend/app/engine/rules.py))
-Maps detected issues to standard Scikit-Learn remediation transformations:
-* High Missingness ($>50\%$) $\rightarrow$ `Drop Redundant / High-Missingness Feature`
-* Continuous Numeric Missingness $\rightarrow$ `Median Imputation (Skewed)` or `Mean Imputation (Normal)`
-* Categorical Missingness $\rightarrow$ `Mode Imputation` or `Constant Fill ('Unknown')`
-* Extreme Outliers $\rightarrow$ `IQR Winsorization / Capping (1.5x IQR)`
-* Non-Negative Domain Breach $\rightarrow$ `Zero-Clipping Transformation`
-* Collinear Pair $\rightarrow$ `Drop Redundant Collinear Feature`
-* High-Cardinality Categoricals $\rightarrow$ `Frequency / Target Encoding` or `Drop High-Cardinality ID`
-
-### Stage 3: Generative AI Justification ([`explainer.py`](file:///c:/Users/Arif%20Choudhary/OneDrive/Desktop/Major%20project/backend/app/engine/explainer.py))
-The system feeds the exact statistical parameters into an LLM (Google Gemini or OpenAI) to generate a high-clarity explanation answering:
-1. *Why does this defect degrade machine learning models?*
-2. *Why is this specific remediation algorithm the mathematically optimal choice?*
-3. *What is the exact impact on variance, bias, and inference?*
-
-> **Zero-Failure Fallback:** If API keys are missing or the network fails, the system seamlessly uses deterministic, high-accuracy statistical fallback templates so execution never halts.
+| Principle | How it is implemented |
+|---|---|
+| Deterministic decisions | Statistical rules choose every fix; the LLM only *explains* the chosen fix. |
+| Human-in-the-loop | Every fix is a toggle; destructive fixes are off by default; nothing runs until “Execute”. |
+| Honest evaluation | Scaling / imputation / SMOTE happen *inside* each CV fold; score can go down after cleaning. |
+| Reproducibility | The exported Python script embeds the exact transform functions and reproduces the exported CSV. |
+| Graceful degradation | Gemini down → statistical explanations; optional ML libs missing → skipped models. |
+| Consistency | Changing upstream inputs (objective, approvals, diagnostics) invalidates downstream results. |
 
 ---
 
-## ⚙️ Safe-Order 12-Step Transformation Execution Engine
+## 2. Repository Layout
 
-When the user clicks **"Apply Fixes & Verify"**, transformations are applied in an immutable, mathematically safe order ([`executor.py`](file:///c:/Users/Arif%20Choudhary/OneDrive/Desktop/Major%20project/backend/app/engine/executor.py)):
+```text
+Major project/
+├── ARCHITECTURE.md                 ← this document
+├── README.md
+├── backend/
+│   ├── .env / .env.example         ← runtime configuration
+│   ├── requirements.txt
+│   ├── datareadiness.db            ← default SQLite DB (created on first run)
+│   ├── uploads/
+│   │   ├── raw/                    ← normalized uploaded datasets ({id}.csv)
+│   │   ├── cleaned/                ← model-ready outputs ({id}_cleaned.csv)
+│   │   └── artifacts/              ← pipeline scripts ({id}_pipeline.py)
+│   └── app/
+│       ├── main.py                 ← FastAPI app, CORS, lifespan
+│       ├── core/
+│       │   ├── config.py           ← pydantic-settings Settings
+│       │   ├── database.py         ← engine, session, init_db + auto-migration
+│       │   └── storage.py          ← parsing, normalization, locks, cleanup
+│       ├── models/dataset.py       ← SQLAlchemy ORM models
+│       ├── schemas/dataset.py      ← Pydantic request/response models
+│       ├── api/
+│       │   ├── deps.py             ← client id, ownership, snapshot, invalidation
+│       │   └── v1/
+│       │       ├── router.py
+│       │       └── endpoints/
+│       │           ├── health.py
+│       │           ├── datasets.py        ← upload, demo, sample, session, delete
+│       │           ├── objectives.py      ← target suggestions, objective
+│       │           ├── diagnostics.py     ← profile + detect + score + recommend
+│       │           ├── recommendations.py ← list, approve, regenerate explanations
+│       │           ├── pipeline.py        ← execute approved fixes
+│       │           ├── benchmarks.py      ← model leaderboard
+│       │           └── exports.py         ← CSV, script, PDF, manifest
+│       └── engine/
+│           ├── profiler.py
+│           ├── detector.py
+│           ├── scorer.py
+│           ├── rules.py
+│           ├── explainer.py
+│           ├── transforms.py
+│           ├── executor.py
+│           ├── benchmark.py
+│           └── reporter.py
+└── frontend/                       ← npm workspaces + Turborepo
+    ├── package.json                ← "turbo dev" etc.
+    └── apps/
+        ├── dashboard/              ← the product UI (port 3000)
+        │   └── src/
+        │       ├── app/{layout,page}.tsx
+        │       ├── services/api.ts
+        │       └── components/
+        │           ├── Header.tsx, Stepper.tsx
+        │           ├── UploadStep.tsx, ObjectiveStep.tsx
+        │           ├── HealthScoreGauge.tsx, ProfileTable.tsx (diagnostic view)
+        │           ├── RecommendationChecklist.tsx
+        │           ├── BeforeAfterDiff.tsx, ModelLeaderboard.tsx
+        │           └── ExportHub.tsx
+        └── landing/                ← marketing site (port 3001)
+            └── src/
+                ├── app/{layout,page,globals.css}
+                ├── lib/motion.ts
+                └── components/{Hero,Scanner,Features,Workflow,Exports,primitives}.tsx
+```
+
+---
+
+## 3. Technology Stack
+
+| Layer | Technology | Purpose |
+|---|---|---|
+| API | **FastAPI**, Uvicorn | REST endpoints, OpenAPI docs at `/docs` |
+| Validation | **Pydantic v2**, pydantic-settings | Schemas, `.env` configuration |
+| ORM / DB | **SQLAlchemy 2**, SQLite (default) / PostgreSQL (`psycopg2-binary`) | Persistence |
+| Data | **pandas**, **NumPy**, SciPy | Parsing, profiling, transforms |
+| ML | **scikit-learn**, **imbalanced-learn** (SMOTE), optional **XGBoost**, **LightGBM** | Benchmarking |
+| Files | openpyxl (`.xlsx`), xlrd (`.xls`) | Excel ingestion |
+| Reports | **ReportLab** | PDF audit report |
+| AI | Google **Gemini** REST API (`requests`) | Natural-language explanations |
+| Frontend | **Next.js 14** (App Router), **React 18**, TypeScript | Dashboard & landing |
+| Icons | lucide-react | UI icons |
+| Monorepo | npm workspaces + **Turborepo** | Run both apps together |
+
+---
+
+## 4. End-to-End User Flow
+
+The dashboard is a five-step wizard. Each step is backed by one or more API calls.
 
 ```mermaid
-graph TD
-    S1["1. Exact Deduplication"] --> S2["2. Datetime Feature Engineering"]
-    S2 --> S3["3. Mixed Unit Parsing"]
-    S3 --> S4["4. Delimited Token Multi-Hot Encoding"]
-    S4 --> S5["5. Invalid Domain Value Clipping"]
-    S5 --> S6["6. Drop Collinear & Unviable Features"]
-    S6 --> S7["7. Semantic Missing Value Imputation"]
-    S7 --> S8["8. High-Cardinality Binning & ID Filtering"]
-    S8 --> S9["9. Outlier Winsorization"]
-    S9 --> S10["10. Categorical One-Hot Encoding"]
-    S10 --> S11["11. StandardScaler Normalization"]
-    S11 --> S12["12. SMOTE Target Resampling"]
+flowchart TD
+    A([1 · Upload]) -->|POST /datasets/upload<br/>or /datasets/demo/key| B([2 · ML Objective])
+    B -->|GET target-suggestions<br/>POST objective| C([3 · Data Health])
+    C -->|POST diagnose| D([4 · Explainable Fixes])
+    D -->|POST recommendations/approve<br/>POST execute| E([5 · Cleaned & Models])
+    E -->|POST benchmark| E
+    E -->|GET export/*| F[(Downloads)]
+
+    D -. "optional: POST recommendations/explain<br/>(retry AI explanations)" .-> D
+    B -. "objective changed ⇒ invalidate diagnostics + execution" .-> B
+    D -. "approvals changed ⇒ invalidate execution" .-> D
 ```
 
-### Why Execution Order Matters:
-1. **Deduplication First:** Prevents duplicate rows from distorting column medians, means, and standard deviations.
-2. **Datetime & Units Extracted Early:** Allows newly generated continuous features (e.g. `release_year`, `duration_minutes`) to participate in downstream imputation and scaling.
-3. **Dropping Features Before Imputation:** Avoids wasting compute power estimating values for columns destined to be removed.
-4. **Imputation Before Winsorization:** Ensures quantile computations ($Q_1, Q_3$) operate on full arrays without NaN pollution.
-5. **Encoding Before Scaling:** Converts categorical strings to binary columns so that numerical scaling normalizes all active inputs uniformly.
-6. **Resampling (SMOTE) Last:** Ensures synthetic minority oversampling occurs only on fully encoded, imputed, and scaled matrices.
+| Step | What the user does | What the system does |
+|---|---|---|
+| **1. Ingestion** | Drags a CSV/XLSX/XLS file or loads a demo (Titanic, Telco churn, Housing). | Validates size/extension, decodes, sniffs delimiter, normalizes headers, stores `{id}.csv`, returns preview + warnings. |
+| **2. ML Objective** | Chooses target column and classification/regression. | Suggests problem type per column, rejects IDs / bad targets, stores objective. |
+| **3. Data Health** | Reviews the score, sub-scores, issues and column profiles. | Profiles → detects issues → computes 0–100 score → selects fixes → explains them. |
+| **4. Explainable Fixes** | Toggles fixes; clicks *Apply N Fixes* (or *Continue Without Fixes*). | Saves approvals, runs the safe-order executor, re-scores, writes cleaned CSV and script. |
+| **5. Results** | Sees before/after diff, leaderboard, downloads artifacts. | Benchmarks models with leak-free CV, builds PDF/manifest on demand. |
+
+Session restore: the dashboard writes `?dataset=<id>` in the URL. Reloading calls `GET /datasets/{id}/session`, which
+returns everything (dataset, objective, diagnostics, execution, leaderboard) so the user lands back on the right step.
 
 ---
 
-## 🏆 Cross-Validation & Model Benchmarking Engine
+## 5. Backend Architecture
 
-Once the dataset is transformed, the platform automatically trains and benchmarks an ensemble of candidate algorithms ([`benchmark.py`](file:///c:/Users/Arif%20Choudhary/OneDrive/Desktop/Major%20project/backend/app/engine/benchmark.py)).
+### 5.1 Application Bootstrap
 
-### Cross-Validation Strategy
+`backend/app/main.py`
 
-#### 1. Classification Problems
-* **Validation Method:** **`StratifiedKFold(n_splits=3, shuffle=True, random_state=42)`**
-* **Scoring Metric:** **Macro F1-Score** (`make_scorer(f1_score, average="macro", zero_division=0)`)
-* **Purpose:** Preserves exact class balance ratios across training and test splits to guard against misleading accuracy in imbalanced scenarios.
+1. Inserts the backend root into `sys.path` so `app.*` imports work when started from any directory.
+2. Configures logging at `INFO`.
+3. **Lifespan** (startup):
+   - `init_db()` → `create_all()` + `_add_missing_columns()` (lightweight auto-migration). Errors are **not**
+     swallowed, so a misconfigured database fails fast.
+   - `cleanup_expired_files()` → deletes stored files older than `FILE_RETENTION_DAYS`.
+4. Adds **CORS** for `BACKEND_CORS_ORIGINS`, exposing `Content-Disposition` so the browser can read download names.
+5. Mounts the v1 router at `/api/v1`.
 
-#### 2. Regression Problems
-* **Validation Method:** **`KFold(n_splits=3, shuffle=True, random_state=42)`**
-* **Scoring Metric:** **$R^2$ Score (Coefficient of Determination)** (`make_scorer(r2_score)`)
-* **Purpose:** Evaluates variance explanation across independent folds without distributional bias.
+All heavy endpoints are **synchronous `def`** functions, so FastAPI runs them in its threadpool and the event loop
+stays responsive while pandas/sklearn work.
 
-### Benchmarked Model Pool
+### 5.2 Configuration
 
+`backend/app/core/config.py` — `Settings(BaseSettings)` reads `backend/.env` (absolute path, so it works from any CWD).
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `DATABASE_URL` | `sqlite:///backend/datareadiness.db` | Any SQLAlchemy URL (e.g. Neon PostgreSQL). |
+| `GEMINI_API_KEY` | `""` | Empty ⇒ statistical explanations only. |
+| `GEMINI_MODEL` | `gemini-3.8-flash` | Primary model. |
+| `GEMINI_FALLBACK_MODELS` | `["gemini-3.7-flash", "gemini-3.8-flash"]` | Tried in order on overload / unavailability. |
+| `GEMINI_TIMEOUT_SEC` | `30` | Per-request timeout. |
+| `GEMINI_MAX_RETRIES` | `2` | Retries per model for 429/5xx/timeouts. |
+| `GEMINI_TOTAL_BUDGET_SEC` | `45` | Hard cap on total time spent waiting for Gemini. |
+| `MAX_UPLOAD_MB` | `200` | Upload limit (413 above it). |
+| `MIN_ROWS` | `10` | Minimum rows after cleaning empty rows. |
+| `FILE_RETENTION_DAYS` | `7` | Stored files older than this are deleted at startup. |
+| `BACKEND_CORS_ORIGINS` | `localhost:3000`, `127.0.0.1:3000` | Allowed browser origins. |
+| `UPLOAD_DIR`, `RAW_DATA_DIR`, `CLEANED_DATA_DIR`, `ARTIFACTS_DIR` | under `backend/uploads/` | Created on import. |
+
+Frontend env vars:
+
+| Variable | Default | Used by |
+|---|---|---|
+| `NEXT_PUBLIC_API_URL` | `http://localhost:8000/api/v1` | Dashboard API client |
+| `NEXT_PUBLIC_DASHBOARD_URL` | `http://localhost:3000` | Landing page CTAs |
+
+### 5.3 Database Layer
+
+`backend/app/core/database.py`
+
+- Creates the SQLAlchemy engine from `DATABASE_URL` (`pool_pre_ping`, `pool_recycle=300`; `check_same_thread=False` for SQLite).
+- `SessionLocal` with `autoflush=False` (code calls `db.flush()` explicitly where needed, e.g. `get_snapshot`).
+- `get_db()` FastAPI dependency yields a session and always closes it.
+- `init_db()` creates tables and runs `_add_missing_columns()`, which compares ORM columns with the live table and
+  issues `ALTER TABLE … ADD COLUMN` for new nullable columns — so upgrading the code doesn’t require dropping the DB.
+
+### 5.4 Data Model
+
+```mermaid
+erDiagram
+    DATASET ||--o| OBJECTIVE : has
+    DATASET ||--o| PROFILE_REPORT : has
+    DATASET ||--o| DATASET_SNAPSHOT : caches
+    DATASET ||--o{ ISSUE_DETECTION : has
+    DATASET ||--o{ HEALTH_SCORE : "before / after"
+    DATASET ||--o{ RECOMMENDATION : has
+    DATASET ||--o{ PROCESSING_JOB : runs
+    DATASET ||--o{ MODEL_BENCHMARK : ranks
+    USER ||--o{ DATASET : "owns (reserved)"
+
+    DATASET {
+        string id PK
+        string owner_token "X-Client-Id of creator"
+        string filename
+        int file_size_bytes
+        string raw_file_path
+        string cleaned_file_path
+        int row_count
+        int col_count
+        datetime uploaded_at
+    }
+    OBJECTIVE {
+        string dataset_id UK
+        string problem_type "classification | regression"
+        string target_column
+    }
+    PROFILE_REPORT {
+        string dataset_id UK
+        json column_profiles
+        json summary_stats
+    }
+    ISSUE_DETECTION {
+        string issue_type
+        string column
+        string severity "critical/high/medium/low/info"
+        json details
+    }
+    HEALTH_SCORE {
+        string stage "before | after"
+        float composite_score
+        json sub_scores
+        text summary_text
+    }
+    RECOMMENDATION {
+        string issue_type
+        string column
+        string method
+        string reason_title
+        text explanation_text
+        string explanation_source "ai | statistical"
+        json params "stats_context incl. method_key, bounds"
+        bool is_destructive
+        bool is_approved
+    }
+    PROCESSING_JOB {
+        string status "running | completed | failed"
+        text error_message
+        string pipeline_file_path
+        string script_file_path
+        json applied_steps
+        datetime completed_at
+    }
+    MODEL_BENCHMARK {
+        string model_name
+        string metric_name
+        float metric_value
+        float training_time_sec
+        int rank
+        bool is_recommended
+        json details
+    }
+    DATASET_SNAPSHOT {
+        string dataset_id UK
+        json diagnostics
+        json execution
+        json leaderboard
+    }
 ```
-┌──────────────────────────────────────────────┬──────────────────────────────────────────────┐
-│ Classification Candidate Models              │ Regression Candidate Models                  │
-├──────────────────────────────────────────────┼──────────────────────────────────────────────┤
-│ • Random Forest Classifier (25 estimators)   │ • Random Forest Regressor (25 estimators)    │
-│ • XGBoost Classifier (if available)          │ • XGBoost Regressor (if available)           │
-│ • LightGBM Classifier (if available)         │ • LightGBM Regressor (if available)          │
-│ • Gradient Boosting Classifier               │ • Gradient Boosting Regressor                │
-│ • Logistic Regression (L2 Regularized)       │ • Ridge Regression (L2 Regularized)          │
-│ • Decision Tree Classifier (Max Depth = 5)   │ • Decision Tree Regressor (Max Depth = 5)    │
-│ • Support Vector Machine (RBF Kernel)        │ • Support Vector Regressor (SVR RBF Kernel)  │
-└──────────────────────────────────────────────┴──────────────────────────────────────────────┘
+
+**Why `DatasetSnapshot`?** Diagnostics/execution/leaderboard responses are expensive to rebuild. They are stored as
+JSON so `GET /session` can restore the whole UI in one cheap call.
+
+**Why `Recommendation.params`?** It stores the exact statistics the rule used (e.g. IQR bounds, median, category list).
+The executor reads these instead of recomputing, so *what the user approved is exactly what runs*.
+
+### 5.5 Ownership, Locking & Invalidation
+
+`backend/app/api/deps.py` and `backend/app/core/storage.py`
+
+**Client identity (no login required)**
+
+- The dashboard generates a random ID once and stores it in `localStorage` (`drp_client_id`).
+- Every request sends it as `X-Client-Id`. `get_client_id` validates it (8–64 chars, alphanumeric/dash) → `401` otherwise.
+- New datasets store it as `owner_token`.
+- `get_owned_dataset` returns **404** if the dataset doesn’t exist **or belongs to another client** (no existence leak),
+  and **410** if its raw file has been deleted by retention cleanup.
+
+**Per-dataset lock**
+
+- `dataset_lock(dataset_id)` is an in-process `threading.Lock` per dataset. Diagnose / execute / benchmark /
+  regenerate-explanations acquire it non-blockingly; a concurrent request receives **409 Conflict** instead of racing.
+
+**Invalidation helper**
+
+`invalidate_execution(db, dataset)` removes everything derived from an execution:
+processing jobs and their files, the cleaned CSV, the “after” health score, model benchmarks, and the
+`execution` / `leaderboard` snapshot fields. It is called whenever the inputs to execution change.
+
+### 5.6 File Storage & Ingestion
+
+`backend/app/core/storage.py`
+
+```mermaid
+flowchart LR
+    U[Uploaded bytes] --> S{size ≤ MAX_UPLOAD_MB?}
+    S -- no --> E413[413 Payload Too Large]
+    S -- yes --> X{extension}
+    X -- .csv --> ENC[try utf-8-sig → utf-8 → cp1252 → latin-1]
+    ENC --> SN[csv.Sniffer delimiter , ; \t |]
+    X -- .xlsx/.xls --> XL[openpyxl / xlrd<br/>read all sheets → first non-empty]
+    SN --> N
+    XL --> N[normalize]
+    N --> N1[drop fully empty rows/cols]
+    N1 --> N2[headers → str, blank/Unnamed → column_N, dedupe _1 _2]
+    N2 --> N3[±inf → NaN]
+    N3 --> V{≥ 2 columns and ≥ MIN_ROWS rows?}
+    V -- no --> E400[400 with explanation]
+    V -- yes --> W[write uploads/raw/{id}.csv<br/>+ warnings list]
 ```
 
-The output yields a ranked **Leaderboard** detailing:
-* Model Rank & Name
-* Cross-Validated Score ($\text{Macro F1}$ or $R^2$)
-* Training Execution Latency ($\text{seconds}$)
-* Suitability Rating (`High` / `Moderate` / `Low`)
-* Architectural Description & Rationale
+Other helpers:
+
+| Function | Role |
+|---|---|
+| `sanitize_filename` | Strips path components and unsafe characters (prevents path traversal). |
+| `read_dataset(path, nrows)` | Reads the normalized CSV back. |
+| `json_safe(obj)` | Converts NaN/inf → `None`, NumPy scalars → Python types (valid JSON everywhere). |
+| `remove_files(*paths)` | Best-effort deletion. |
+| `cleanup_expired_files()` | Retention cleanup at startup. |
+
+### 5.7 REST API Reference
+
+Base URL: `http://localhost:8000/api/v1`. All `/datasets/*` routes require the `X-Client-Id` header.
+
+| Method | Path | Purpose | Notes / errors |
+|---|---|---|---|
+| GET | `/health` | Liveness | Used by the dashboard header (Online/Offline). |
+| POST | `/datasets/upload` | Upload CSV/XLSX/XLS (multipart `file`) | 400 bad file, 413 too large; returns preview + `warnings`. |
+| POST | `/datasets/demo/{key}` | Load `titanic`, `churn` or `housing` | Seeded realistic data with real defects. |
+| GET | `/datasets/{id}/sample` | First rows preview | |
+| GET | `/datasets/{id}/session` | Full restore payload | dataset, objective, diagnostics, execution, leaderboard. |
+| DELETE | `/datasets/{id}` | Delete dataset + all files and rows | 204. |
+| GET | `/datasets/{id}/target-suggestions` | Per-column suggested problem type + warnings | |
+| POST | `/datasets/{id}/objective` | Set target + problem type | 400 if ID column, mismatch, single-row classes, <10 labels. Changing it clears diagnostics & execution. |
+| GET | `/datasets/{id}/objective` | Read objective | |
+| POST | `/datasets/{id}/diagnose` | Profile → detect → score → recommend → explain | 400 without objective, 409 if busy. Clears previous execution. |
+| GET | `/datasets/{id}/recommendations` | List recommendations | |
+| POST | `/datasets/{id}/recommendations/approve` | `{ "approvals": { id: bool } }` | 400 for unknown IDs; a real change invalidates execution. |
+| POST | `/datasets/{id}/recommendations/explain` | Retry AI explanations | 400 no key / no diagnostics, 503 if Gemini still unavailable. Never changes approvals. |
+| POST | `/datasets/{id}/execute` | Run approved fixes | 400 without diagnostics, 409 if busy; returns before/after scores, signed deltas, steps. |
+| POST | `/datasets/{id}/benchmark` | Cross-validated leaderboard | 400 if not executed or target unsuitable. |
+| GET | `/datasets/{id}/export/cleaned-csv` | Model-ready CSV | |
+| GET | `/datasets/{id}/export/pipeline-script` | Standalone Python script | |
+| GET | `/datasets/{id}/export/pdf-report` | PDF audit report | Works even if not executed (“not executed”). |
+| GET | `/datasets/{id}/export/manifest-json` | Machine-readable manifest | params, sources, applied steps, scores. |
+
+Interactive docs: `http://localhost:8000/docs`.
 
 ---
 
-## 📦 Export Hub & Reproducible Artifact Generation
+## 6. The Engine (Core Intelligence)
 
-Upon execution, the engine compiles 4 production-grade export artifacts:
+The engine is pure Python with no web dependencies, which makes it testable in isolation.
 
-1. **Cleaned Dataset (`.csv`):** Fully sanitized, transformed, and model-ready tabular file.
-2. **Standalone Python Pipeline Script (`.py`):** Self-contained, executable Scikit-Learn script containing the exact sequence of transformations for local integration or CI/CD pipelines.
-3. **Executive PDF Audit Report (`.pdf`):** Formal ReportLab-generated audit document with Data Health Score dials, issue breakdowns, before/after metric deltas, and model recommendations.
-4. **Machine-Readable JSON Manifest (`.json`):** Full telemetry metadata containing column profiles, statistical issues, applied remediation rules, and benchmarking leaderboards.
-
----
-
-## 📂 Project Directory & File Structure
-
-```
-Major project/
-├── backend/                               # FastAPI Python Backend
-│   ├── app/
-│   │   ├── core/
-│   │   │   └── config.py                  # Environment settings, CORS, LLM API keys
-│   │   ├── engine/                        # Core Data Intelligence Engines
-│   │   │   ├── profiler.py                # Type inference & summary statistics
-│   │   │   ├── detector.py                # Multi-pass data defect detection
-│   │   │   ├── scorer.py                  # 0–100 Data Health Score algorithm
-│   │   │   ├── rules.py                   # Heuristic recommendation generator
-│   │   │   ├── explainer.py               # AI justifications (Gemini / OpenAI)
-│   │   │   ├── executor.py                # 12-Step safe-order transformation pipeline
-│   │   │   ├── benchmark.py               # 3-Fold cross-validation model evaluator
-│   │   │   └── reporter.py                # PDF ReportLab generator
-│   │   ├── routers/                       # REST API Route Controllers
-│   │   │   ├── ingestion.py               # File upload & profile endpoints
-│   │   │   ├── diagnosis.py               # Objective & health diagnosis
-│   │   │   ├── remediation.py             # Transformation pipeline execution
-│   │   │   └── export.py                  # Download & artifact endpoints
-│   │   └── main.py                        # FastAPI application entrypoint
-│   ├── storage/                           # Ingested datasets & export artifacts
-│   ├── requirements.txt                   # Python dependencies
-│   └── .env                               # Environment configurations
-│
-├── frontend/                              # Next.js Turborepo Workspace
-│   ├── apps/
-│   │   ├── dashboard/                     # Main Application UI
-│   │   │   └── src/
-│   │   │       ├── app/                   # App Router pages & global styles
-│   │   │       │   ├── page.tsx           # Step-by-step diagnostic workflow
-│   │   │       │   └── globals.css        # Design tokens & modern light theme
-│   │   │       ├── components/            # UI Components
-│   │   │       │   ├── Header.tsx         # Platform navbar & dataset indicator
-│   │   │       │   ├── Stepper.tsx        # 5-stage progress indicator
-│   │   │       │   ├── UploadStep.tsx     # Drag-and-drop ingestion zone
-│   │   │       │   ├── ObjectiveStep.tsx  # Target column & problem selector
-│   │   │       │   ├── HealthScoreGauge.tsx # Radial SVG health score meter
-│   │   │       │   ├── ProfileTable.tsx   # Feature profiling matrix table
-│   │   │       │   ├── RecommendationChecklist.tsx # Explainable fix approvals
-│   │   │       │   ├── BeforeAfterDiff.tsx # Before vs after delta comparison
-│   │   │       │   ├── ModelLeaderboard.tsx # Ranked ML model benchmark cards
-│   │   │       │   └── ExportHub.tsx      # Artifact download hub
-│   │   │       └── services/
-│   │   │           └── api.ts             # Axios API client & data interfaces
-│   │   └── landing/                       # Product Landing & Feature Showcase
-│   ├── package.json                       # Turborepo root configuration
-│   └── turbo.json                         # Turborepo pipeline caching
-│
-└── README.md                              # Complete System Documentation
+```mermaid
+flowchart LR
+    RAW[(raw DataFrame)] --> P[profiler] --> DET[detector] --> SC1[scorer<br/>before]
+    DET --> R[rules] --> EX[explainer]
+    EX --> REC[(recommendations)]
+    REC -- user approvals --> EXE[executor]
+    RAW --> EXE
+    EXE --> CLEAN[(df_cleaned)] --> P2[profiler + detector] --> SC2[scorer<br/>after]
+    EXE --> MR[(df_model_ready)] --> BM[benchmark]
+    EXE --> SCR[pipeline.py]
+    SC1 & SC2 & BM --> REP[reporter → PDF]
 ```
 
+### 6.1 Profiler — `profiler.py`
+
+Builds `summary_stats` (rows, columns, overall missing %, duplicate rows/% …) and one profile per column.
+
+**Semantic type inference** (beyond pandas dtypes):
+
+| Type | Rule |
+|---|---|
+| `identifier` | All values unique **and** (strong ID token like `uuid`, last name token in `{id, key, code…}`, or a sequential integer column with > 20 rows). Uses `name_tokens()` which splits `snake_case` and `camelCase`. |
+| `boolean` | Two values from a case-insensitive boolean vocabulary (`yes/no`, `true/false`, `0/1`, `y/n` …). |
+| `year` | Integer values in a plausible year range **and** name contains “year”. |
+| `datetime_string` | Text values matching date-like patterns (and/or date-ish name tokens). |
+| `numeric` / `categorical` / `text` | Fallbacks by dtype and cardinality. |
+
+Per-column stats include missing count/%, unique count/%, cardinality, mean/median/std/skew/min/max, IQR bounds and
+outlier counts for numerics, top values for categoricals, and sample values.
+
+**Duplicates ignore identifier columns** (`duplicate_subset`, `count_duplicate_records`): a passenger re-entered with a
+new `PassengerId` is still a duplicate.
+
+### 6.2 Detector — `detector.py`
+
+Produces a list of issues `{issue_type, column, severity, title, details}`:
+
+| Issue type | Trigger |
+|---|---|
+| `duplicate_rows` | Duplicate records (ID columns excluded). |
+| `missing_target` | Rows with no target label. |
+| `identifier_column` | Column profiled as an identifier. |
+| `missing_values` | Missing values in a feature (target handled separately). |
+| `constant_feature` | Single distinct value (any dtype). |
+| `unparsed_datetime_feature` | Date strings stored as text. |
+| `unit_mixed_feature` | Values like `12 kg`, `3.5 lbs`. |
+| `multilabel_delimited_text` | Delimited lists like `a, b; c`. |
+| `high_cardinality_text` | > 50 unique, or > 40 % unique when rows > 50. |
+| `rare_categories` | More than 10 categories with a long tail. |
+| `invalid_domain_values` | Negative values in a column whose name contains a non-negative keyword (`age`, `price`, `fare`, `count` … whole-word match). |
+| `statistical_outliers` | Numeric columns with > 1 % values outside 1.5×IQR. |
+| `categorical_encoding` | Text features that need encoding (aggregate, info severity). |
+| `multicollinear_features` | Pearson \|r\| > 0.85 (top 5 pairs, never drops both sides). |
+| `class_imbalance` | Majority/minority ratio ≥ 3 (multi-class aware; stores `imbalance_ratio`). |
+
+### 6.3 Scorer — `scorer.py`
+
+Six sub-scores (each 0–100) combined with weights:
+
+| Sub-score | Weight | Penalty formula |
+|---|---|---|
+| Missingness | **25 %** | `overall_missing% × 2.5 + worst_column_missing% × 0.25` |
+| Duplicates | 15 % | `duplicate% × 5` |
+| Outliers | 15 % | `avg_outlier% × 3 + 4 × (#outlier columns)` |
+| Validity | 15 % | `20 × (#invalid-domain issues)` |
+| Target balance | 15 % | `(imbalance_ratio − 1) × 12` (classification only) |
+| Feature quality | 15 % | `10 × collinear pairs + 15 × constant cols + 5 × ID cols` |
+
+\[
+\text{composite} = \sum_i w_i \cdot s_i \;-\; \min(20,\; 20 \times \text{dropped\_informative\_ratio})
+\]
+
+The **retention penalty** (after-score only) prevents gaming the score by deleting problematic columns.
+
+Grades: **A** ≥ 90 · **B** ≥ 80 · **C** ≥ 70 · **D** ≥ 60 · **F** < 60. The scorer also returns a summary sentence and
+the top negative drivers (e.g. “missing values”, “class imbalance”).
+
+### 6.4 Rules Engine — `rules.py`
+
+Maps each issue to a concrete fix. Every recommendation carries `stats_context.method_key` and the exact parameters.
+
+| Issue | Fix (`method_key`) | Default approved? |
+|---|---|---|
+| duplicate_rows | `drop_duplicates` | ✅ |
+| missing_target | `drop_missing_target` | ✅ |
+| identifier_column | `drop_identifier` | ✅ |
+| missing_values > 70 % | `drop_column_missing` | ❌ (destructive) |
+| missing numeric / year | `impute_median` if \|skew\| > 1 else `impute_mean` | ✅ |
+| missing categorical / boolean | `impute_mode` | ✅ |
+| missing free text / entity | `impute_unknown` (+ `has_<col>` flag) | ✅ |
+| unparsed_datetime_feature | `parse_datetime` → year / month / day | ✅ |
+| unit_mixed_feature | `split_units` → value + unit | ✅ |
+| multilabel_delimited_text | `multi_hot` (exact tokens) | ✅ |
+| invalid_domain_values | `replace_negatives_median` | ✅ |
+| statistical_outliers | `cap_outliers` at stored IQR bounds | ✅ |
+| multicollinear_features | `drop_collinear` | ❌ |
+| constant_feature | `drop_constant` | ✅ |
+| high_cardinality_text | `drop_high_cardinality` | ✅ |
+| rare_categories | `group_rare` (top-10 + `Other`) | ✅ |
+| categorical_encoding | `one_hot_encode` (fixed category lists) | ✅ |
+| class_imbalance | `smote_class_weights` (ratio ≥ 6) or `class_weights` | ✅ (applied only during benchmarking) |
+
+### 6.5 Explainer — `explainer.py`
+
+```mermaid
+flowchart TD
+    A[recommendations] --> K{GEMINI_API_KEY set?}
+    K -- no --> F[statistical explanations<br/>source = statistical]
+    K -- yes --> M[for model in GEMINI_MODEL + FALLBACK_MODELS]
+    M --> R[POST generateContent<br/>header x-goog-api-key<br/>JSON response mode]
+    R -->|200| P[parse JSON array index → explanation]
+    R -->|429 / 5xx / timeout| B[exponential backoff 2s, 4s<br/>respects Retry-After]
+    B --> R
+    R -->|404| M
+    R -->|400/401/403| F
+    M -->|all failed or budget exhausted| F
+    P --> MIX[AI text where returned,<br/>statistical for the rest]
+```
+
+- The prompt sends only the computed statistics and instructs the model to cite them, never invent numbers, and
+  never change the chosen method.
+- Fallback explanations are deterministic templates keyed by `method_key`, filled with the real statistics.
+- Each recommendation records `explanation_source` (`ai` / `statistical`) and the UI labels it.
+- Total waiting is capped by `GEMINI_TOTAL_BUDGET_SEC`; the user can retry later via
+  `POST /recommendations/explain` (the “Retry AI Explanations” button).
+- Only exception *types* are logged so request details (and the key) never reach logs.
+
+### 6.6 Transforms — `transforms.py`
+
+Pure, side-effect-free pandas functions. The executor calls them, **and** their source code is embedded verbatim
+into the exported script (`inspect.getsource`) — guaranteeing the script reproduces the app’s output.
+
+| Function | Behaviour |
+|---|---|
+| `drop_rows_missing(df, col)` | Remove rows with missing target. |
+| `drop_duplicate_rows(df, subset)` | Drop duplicates using non-ID columns. |
+| `drop_columns(df, cols)` | Remove columns. |
+| `extract_datetime(df, col, fill_year, fill_month, fill_day)` | Parse dates → `col_year/month/day`. |
+| `split_units(df, col, fill_value)` | `"12 kg"` → `col_value`, `col_unit`. |
+| `multi_hot(df, col, tokens)` | One indicator column per known token. |
+| `replace_negatives(df, col, value)` | Negative → stored median. |
+| `clip_values(df, col, lower, upper)` | Cap at stored IQR bounds. |
+| `fill_missing(df, col, value, add_flag)` | Impute (optionally add `has_<col>`). |
+| `group_rare(df, col, keep)` | Values outside `keep` → `Other`. |
+| `one_hot(df, col, categories)` | Fixed-category one-hot encoding. |
+
+### 6.7 Executor — `executor.py`
+
+Applies only approved recommendations in a **safe order**:
+
+```text
+1. drop rows with missing target
+2. drop duplicate records
+3. drop identifier columns
+4. parse datetimes
+5. split value+unit columns
+6. multi-hot delimited lists
+7. replace invalid negatives
+8. drop columns (constant / high-cardinality / >70% missing / collinear)
+9. cap outliers            ← before imputation so fills aren't skewed
+10. impute missing values
+11. group rare categories
+12. one-hot encode         ← skipped for > 50 categories
+```
+
+Returns a `PipelineResult`:
+
+| Field | Meaning |
+|---|---|
+| `df_cleaned` | Cleaned but **not encoded** — used for re-profiling / after-score (fair comparison). |
+| `df_model_ready` | Encoded output — saved as the cleaned CSV and used for benchmarking. |
+| `applied_steps` | Human-readable list of what ran. |
+| `script_code` | The generated standalone Python script. |
+| `dropped_informative_columns` | Feeds the scorer’s retention penalty. |
+
+There is deliberately **no scaling, SMOTE or blanket “fill everything”** in the executor: scaling/SMOTE belong inside
+model training folds, and silent fills would hide data problems.
+
+**Generated script structure** (`{id}_pipeline.py`):
+
+```python
+# header: dataset, timestamp, how to run
+# <verbatim source of transforms.py helpers>
+def clean_data(df):
+    df = drop_rows_missing(df, "Survived")
+    df = drop_duplicate_rows(df, subset=[...])
+    ...
+    return df
+
+if __name__ == "__main__":
+    # python pipeline.py input.csv output.csv
+```
+
+### 6.8 Benchmark — `benchmark.py`
+
+```mermaid
+flowchart TD
+    A[df_model_ready + target] --> T[prepare_target]
+    T -->|classification| C1[label-encode; reject continuous or ID-like targets]
+    T -->|regression| R1[require numeric with > 2 unique values]
+    C1 & R1 --> S[sample ≤ 2000 rows - stratified for classification]
+    S --> F[_prepare_features: get_dummies, drop text > 50 categories]
+    F --> CV{problem type}
+    CV -->|classification| SK[StratifiedKFold n = min 5, smallest class]
+    CV -->|regression| KF[KFold n = min 5, rows/10]
+    SK & KF --> PL["per model Pipeline:<br/>SimpleImputer → StandardScaler → [SMOTE] → model"]
+    PL --> CVS[cross_val_score error_score=raise]
+    CVS --> LB[rank by mean metric → leaderboard + summary]
+```
+
+- **Metrics:** classification = **F1-Score (Macro)**, regression = **R² Score**.
+- **Models (classification):** Random Forest, XGBoost*, LightGBM*, Gradient Boosting, Logistic Regression,
+  Decision Tree, SVM (RBF). **Regression:** Random Forest, XGBoost*, LightGBM*, Ridge Regression, Gradient Boosting,
+  Decision Tree, SVR. (*if installed)
+- **Imbalance:** if the approved recommendation is `class_weights` → `class_weight="balanced"`; if
+  `smote_class_weights` → SMOTE inside the pipeline (fold-safe) with `k_neighbors` adapted to the smallest class.
+- **Why it’s honest:** imputation, scaling and SMOTE are fitted on each training fold only — the validation fold never
+  leaks into preprocessing. Titanic lands around **0.78 F1** instead of a suspicious 1.000.
+- If every model fails → `BenchmarkError` → HTTP 400 with the reason.
+
+### 6.9 Reporter — `reporter.py`
+
+Builds the PDF with ReportLab:
+
+- Title, dataset name (HTML-escaped), generation time.
+- Before / after composite scores and grades (“not executed” if there is no after score).
+- Table of all six sub-scores with **signed** deltas (`+12.5`, `−3.0`).
+- Applied steps (escaped), the leaderboard or a “no benchmarks yet” note.
+
 ---
 
-## 🔌 REST API Data Contracts & Endpoint Reference
+## 7. Frontend Architecture
 
-### Base URL: `http://localhost:8000/api/v1`
+### 7.1 Monorepo
 
-| Method | Endpoint | Description | Request Payload / Params | Response Payload |
-| :--- | :--- | :--- | :--- | :--- |
-| `POST` | `/datasets/upload` | Ingest raw CSV or Excel dataset | `multipart/form-data` (`file`) | `DatasetSummary` (ID, rows, cols, preview sample) |
-| `POST` | `/diagnose` | Run full diagnostic profiling & AI fixes | `{"dataset_id": "...", "problem_type": "...", "target_column": "..."}` | `DiagnosticResponse` (Profile, Health Score, Recommendations) |
-| `POST` | `/execute` | Run safe-order cleaning & benchmarking | `{"dataset_id": "...", "approved_recommendation_ids": [...]}` | `ExecutionResult` (Before/After Score, Leaderboard, Deltas) |
-| `GET` | `/export/csv/{dataset_id}` | Download model-ready CSV | Path Parameter: `dataset_id` | File download (`.csv`) |
-| `GET` | `/export/pipeline/{dataset_id}`| Download standalone Python code | Path Parameter: `dataset_id` | File download (`.py`) |
-| `GET` | `/export/pdf/{dataset_id}` | Download executive PDF audit | Path Parameter: `dataset_id` | File download (`.pdf`) |
-| `GET` | `/export/manifest/{dataset_id}`| Download machine-readable manifest | Path Parameter: `dataset_id` | JSON payload (`manifest.json`) |
+`frontend/package.json` uses npm workspaces (`apps/*`) and Turborepo:
 
----
+| Script | Effect |
+|---|---|
+| `npm run dev` | Starts **dashboard (3000)** and **landing (3001)** together. |
+| `npm run dev:dashboard` / `dev:landing` | One app only. |
+| `npm run build` / `check-types` / `lint` | Across all apps. |
 
-## 🚀 Installation & Local Setup Guide
+### 7.2 Dashboard App (port 3000)
 
-### Prerequisites
-* **Python 3.10+** (Python 3.11 recommended)
-* **Node.js 18+** & **npm 9+**
-* Optional: Gemini API Key (`GEMINI_API_KEY`) or OpenAI API Key (`OPENAI_API_KEY`)
+```mermaid
+flowchart TD
+    PAGE[app/page.tsx<br/>wizard state owner] --> H[Header<br/>polls /health every 15s]
+    PAGE --> ST[Stepper<br/>completedSteps derived from data]
+    PAGE --> U[UploadStep]
+    PAGE --> O[ObjectiveStep]
+    PAGE --> DG[Diagnostic view<br/>HealthScoreGauge · issues · ProfileTable]
+    PAGE --> RC[RecommendationChecklist]
+    PAGE --> BA[BeforeAfterDiff]
+    PAGE --> ML[ModelLeaderboard]
+    PAGE --> EH[ExportHub]
+    PAGE <--> API[services/api.ts]
+    API <--> BE[(FastAPI)]
+```
 
----
+**`services/api.ts`** — the single gateway to the backend:
 
-### Step 1: Backend Setup
+- `getClientId()` — creates/stores `drp_client_id` in `localStorage`; attached as `X-Client-Id` on every request.
+- `request()` / `requestJson()` — wraps `fetch`; network failure → “Cannot reach the backend at …”.
+- `extractErrorMessage()` — handles FastAPI `detail` strings, 422 validation arrays and non-JSON bodies → `ApiError(message, status)`.
+- Methods: `checkHealth`, `uploadDataset`, `loadDemo`, `getSession`, `deleteDataset`, `getTargetSuggestions`,
+  `setObjective`, `runDiagnostics`, `updateApprovals`, `regenerateExplanations`, `executePipeline`, `runBenchmarks`,
+  `downloadExport(id, kind, fallbackName)` (fetches a blob and triggers a download using `Content-Disposition`).
+- Constants: `MAX_UPLOAD_MB`, `SUPPORTED_EXTENSIONS` (client-side pre-validation).
 
-1. Open terminal and navigate to the backend directory:
-   ```bash
-   cd backend
-   ```
+**`app/page.tsx`** — owns all wizard state:
 
-2. Create and activate a Python virtual environment:
-   ```bash
-   # Windows (PowerShell)
-   python -m venv venv
-   .\venv\Scripts\Activate.ps1
+| State | Purpose |
+|---|---|
+| `dataset`, `objective`, `diagnostics`, `executionResult`, `leaderboard` | Server data per step. |
+| `approvals` | Current toggle state (source of truth for the checklist). |
+| `executedApprovals` | Approvals at last execution → shows a “changed since last run” banner. |
+| `currentStep` | Visible step; `completedSteps` is **derived** from which data exists. |
+| `error`, `notices`, `benchmarkError`, loading flags | Dismissible banners, separate benchmark retry. |
 
-   # macOS / Linux
-   python3 -m venv venv
-   source venv/bin/activate
-   ```
+Key behaviours:
 
-3. Install required Python packages:
-   ```bash
-   pip install -r requirements.txt
-   ```
+- **Restore:** on load, `?dataset=<id>` → `getSession` → rebuilds state and jumps to the furthest valid step.
+- **Objective unchanged** → skips re-calling the API (no needless invalidation).
+- **Execute:** `updateApprovals` → `executePipeline` → navigate to results → `runBenchmarks` in the background.
+  A benchmark failure shows its own retry button and doesn’t hide the cleaning results.
+- **Reset:** confirmation, then `DELETE /datasets/{id}`.
 
-4. Configure your `.env` file in the `backend/` folder:
-   ```env
-   PROJECT_NAME="AI Data Readiness Platform"
-   API_V1_STR="/api/v1"
-   BACKEND_CORS_ORIGINS=["http://localhost:3000","http://localhost:3001"]
+**Components**
 
-   # Optional: AI Reasoning API Keys (Defaults to statistical template fallback if omitted)
-   GEMINI_API_KEY="your-gemini-api-key-here"
-   OPENAI_API_KEY=""
-   ```
+| Component | Responsibility |
+|---|---|
+| `Header` | Brand + live backend status (Online / Offline / Checking). |
+| `HealthScoreGauge` | Composite score dial, grade and sub-score breakdown. |
+| `ProfileTable` | Per-column profile (type, missing %, unique, stats). |
+| `Stepper` | Five steps; completed ones are clickable. |
+| `UploadStep` | Drag & drop, extension/size checks, ignores input while loading, resets input to allow same file, three demo cards. |
+| `ObjectiveStep` | Target dropdown with suggestions, auto-sets problem type, warnings, “(not recommended)” options. |
+| `RecommendationChecklist` | Toggles, Approve/Reject all, AI vs Statistical badge, **Retry AI Explanations**, execution progress modal, “Continue Without Fixes”. |
+| `BeforeAfterDiff` | Before/after scores, signed delta coloured by sign, honest message, applied steps. |
+| `ModelLeaderboard` | Ranked models, metric, CV folds, summary, empty state. |
+| `ExportHub` | Four download buttons with busy/error states, enabled based on what exists. |
 
-5. Start the FastAPI backend server:
-   ```bash
-   uvicorn app.main:app --reload --port 8000
-   ```
-   * *Swagger API Interactive Docs:* [http://localhost:8000/docs](http://localhost:8000/docs)
-   * *API Health Check:* [http://localhost:8000/health](http://localhost:8000/health)
+### 7.3 Landing App (port 3001)
 
----
+A marketing page built with plain React + CSS (no animation library), honouring `prefers-reduced-motion`.
 
-### Step 2: Frontend Setup
+| Section | Component | Effects |
+|---|---|---|
+| Nav | `Hero.tsx › Nav` | Sticky blurred bar, underline-sweep links, magnetic CTA. |
+| Hero | `Hero.tsx` | Sky with 3 parallax cloud layers (SVG turbulence filter), scrambling headline, self-drawing squiggle, handwritten note. |
+| Tech strip | `Hero.tsx` | Boxed stack labels that flip to their role on hover. |
+| Live scan | `Scanner.tsx` | Sticky scroll-driven scanner fixes a dirty Titanic table; score 54 → 94; fix log ticks. |
+| Features | `Features.tsx` | Bento grid, 3D tilt + cursor spotlight, animated score bars, working toggles. |
+| Workflow | `Workflow.tsx` | Pinned horizontal scroll through 5 steps with progress bar. |
+| Exports | `Exports.tsx` | Typing terminal with `pipeline.py` / `manifest.json` / leaderboard tabs. |
+| CTA + footer | `Exports.tsx` | Drifting colour blobs; giant outlined wordmark that fills under the cursor. |
 
-1. Open a new terminal and navigate to the frontend directory:
-   ```bash
-   cd frontend
-   ```
-
-2. Install Node dependencies:
-   ```bash
-   npm install
-   ```
-
-3. Start the Next.js development server:
-   ```bash
-   # Start all applications via Turborepo
-   npm run dev
-
-   # Or run dashboard directly
-   npm run dev:dashboard
-   ```
-
-4. Open your browser and navigate to:
-   * **Dashboard Application:** [http://localhost:3000](http://localhost:3000) (or port displayed in terminal)
-   * **Landing Page:** [http://localhost:3001](http://localhost:3001)
+Shared utilities live in `lib/motion.ts` (`useInView`, `useStickyProgress`, `useReducedMotion`, `trackPointer`) and
+`components/primitives.tsx` (`Reveal`, `Eyebrow`, `MagneticLink`, `Scramble`, `Squiggle`, `HandArrow`).
 
 ---
 
-## 🛡️ License
+## 8. Request Lifecycles
 
-This project is licensed under the **MIT License**.
+### 8.1 Upload
+
+```mermaid
+sequenceDiagram
+    participant UI as Dashboard
+    participant API as FastAPI
+    participant ST as storage.py
+    participant DB as Database
+    participant FS as uploads/raw
+
+    UI->>UI: check extension + size
+    UI->>API: POST /datasets/upload (file, X-Client-Id)
+    API->>API: read ≤ MAX_UPLOAD_MB (413 if larger)
+    API->>ST: parse_uploaded_file(bytes, ext)
+    ST-->>API: DataFrame + warnings (or 400)
+    API->>FS: write {id}.csv (normalized)
+    API->>DB: INSERT dataset(owner_token)
+    API-->>UI: DatasetResponse (preview, columns, warnings)
+```
+
+### 8.2 Diagnose
+
+```mermaid
+sequenceDiagram
+    participant UI as Dashboard
+    participant API as diagnostics.py
+    participant ENG as Engine
+    participant GEM as Gemini
+    participant DB as Database
+
+    UI->>API: POST /datasets/{id}/diagnose
+    API->>API: get_owned_dataset, require objective
+    API->>API: acquire dataset_lock (409 if busy)
+    API->>ENG: profile → detect → score(before) → rules
+    ENG->>GEM: explain (retries / fallback models, ≤ 45 s)
+    GEM-->>ENG: explanations or failure
+    ENG-->>API: recommendations (ai/statistical)
+    API->>DB: replace profile, issues, before-score, recommendations
+    API->>DB: invalidate_execution + save snapshot.diagnostics
+    API-->>UI: FullDiagnosticResponse
+```
+
+### 8.3 Execute + Benchmark
+
+```mermaid
+sequenceDiagram
+    participant UI as Dashboard
+    participant API as FastAPI
+    participant EXE as executor.py
+    participant SC as scorer.py
+    participant BM as benchmark.py
+    participant DB as Database
+
+    UI->>API: POST recommendations/approve
+    API->>DB: update is_approved (invalidate if changed)
+    UI->>API: POST execute
+    API->>DB: job = running
+    API->>EXE: execute_pipeline(raw, approved recs)
+    EXE-->>API: df_cleaned, df_model_ready, steps, script
+    API->>SC: re-profile df_cleaned → after-score (retention penalty)
+    API->>DB: save cleaned CSV path, after-score, job = completed, snapshot.execution
+    API-->>UI: ExecutionResponse (signed deltas)
+    UI->>API: POST benchmark
+    API->>BM: benchmark_models(df_model_ready, imbalance strategy)
+    BM-->>API: leaderboard, metric, summary, folds
+    API->>DB: save ModelBenchmarks + snapshot.leaderboard
+    API-->>UI: Leaderboard
+```
+
+---
+
+## 9. State Machine & Invalidation Rules
+
+```mermaid
+stateDiagram-v2
+    [*] --> Uploaded: upload / demo
+    Uploaded --> ObjectiveSet: POST objective
+    ObjectiveSet --> Diagnosed: POST diagnose
+    Diagnosed --> Executed: POST execute
+    Executed --> Benchmarked: POST benchmark
+
+    ObjectiveSet --> ObjectiveSet: objective changed
+    Diagnosed --> ObjectiveSet: objective changed ⇒ clear diagnostics + execution
+    Executed --> ObjectiveSet: objective changed
+    Benchmarked --> ObjectiveSet: objective changed
+
+    Executed --> Diagnosed: approvals changed ⇒ clear execution
+    Benchmarked --> Diagnosed: approvals changed / re-diagnose
+
+    Uploaded --> [*]: DELETE
+    Benchmarked --> [*]: DELETE
+```
+
+| Trigger | What is cleared |
+|---|---|
+| Objective changed | Profile, issues, before/after scores, recommendations, jobs, cleaned file, benchmarks, snapshot. |
+| Diagnose re-run | Previous recommendations + all execution results. |
+| Approval actually changed | Execution results (jobs, cleaned CSV, after-score, benchmarks, snapshot.execution/leaderboard). |
+| Regenerate explanations | Nothing — only `explanation_text` / `explanation_source` change. |
+| Delete | Everything for the dataset, including files. |
+
+Preconditions enforced server-side: objective before diagnose, diagnostics before execute, execution before benchmark.
+
+---
+
+## 10. Error Handling Strategy
+
+| Situation | Backend response | Frontend behaviour |
+|---|---|---|
+| Missing/invalid `X-Client-Id` | 401 | The ID is created automatically in `localStorage`, so this only happens if it is tampered with. |
+| Dataset not found / not yours | 404 | During session restore: clears `?dataset=` and asks the user to upload again. |
+| Raw file expired | 410 | Same as 404: “session is no longer available, please upload again”. |
+| Bad file / too few rows / invalid target | 400 with explanation | Dismissible error banner with the server’s message. |
+| File too large | 413 | Caught client-side first. |
+| Concurrent operation | 409 | Error banner with the server’s “operation already running” message. |
+| Gemini down | 200 with statistical explanations; 503 only on explicit retry | Badge shows “Statistical”; retry button. |
+| Benchmark impossible | 400 (`BenchmarkError`) | Separate benchmark error with retry. |
+| Backend offline | network error | Header shows Offline; “Cannot reach the backend”. |
+
+---
+
+## 11. Security Model
+
+- **No secrets in code** — DB URL and Gemini key come from `backend/.env` (git-ignored); `.env.example` has placeholders.
+  > ⚠️ An old Neon database password exists in git history and must be rotated.
+- **Per-browser isolation** via `X-Client-Id` + `owner_token`; foreign datasets return 404.
+- **Path traversal protection** — uploaded names are sanitized and files are always saved as `{uuid}.csv`.
+- **Upload limits** — size cap streamed server-side, extension allow-list.
+- **Output escaping** — dataset names and steps are escaped in the PDF.
+- **Gemini key** sent in the `x-goog-api-key` header (not the URL) and never logged.
+- **Retention** — stored files are purged after `FILE_RETENTION_DAYS`.
+- **CORS** limited to configured origins.
+
+> The client ID is an isolation mechanism, not authentication. For multi-user production use, add real auth
+> (the `User` table and `Dataset.user_id` are already reserved for this).
+
+---
+
+## 12. Running the Project
+
+### Backend
+
+```bash
+cd backend
+python -m venv .venv
+.venv\Scripts\activate            # Windows  (source .venv/bin/activate on macOS/Linux)
+pip install -r requirements.txt
+copy .env.example .env            # then fill GEMINI_API_KEY / DATABASE_URL if wanted
+uvicorn app.main:app --reload --port 8000
+```
+
+- API: `http://localhost:8000` · Docs: `http://localhost:8000/docs`
+- Without `DATABASE_URL`, a local SQLite file `backend/datareadiness.db` is used.
+- For PostgreSQL, `psycopg2-binary` (in requirements) must be installed.
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev            # dashboard → http://localhost:3000, landing → http://localhost:3001
+```
+
+> Don’t run `next build` inside an app while its `next dev` server is running — both use the same `.next` folder,
+> and the dev server will start returning 404s for CSS/JS. Stop dev, build, then restart.
+
+---
+
+## 13. Testing & Verification
+
+The fixes were validated with an end-to-end script driving the API through FastAPI’s `TestClient` against a temporary
+SQLite database (Gemini disabled), covering:
+
+- Uploads: single-column file, unsupported extension, semicolon + cp1252 CSV, path-traversal filename, Excel with
+  numeric headers, infinities.
+- Flow guards: execute before diagnose rejected, foreign recommendation IDs rejected, ownership checks for read/delete.
+- Correctness: signed score deltas, ID-aware duplicates, numeric median/mean imputation, mode imputation for
+  low-cardinality ints, target labels preserved.
+- **Reproducibility:** the exported `pipeline.py` run on the raw file produces exactly the exported CSV.
+- **Honest benchmarks:** no suspicious perfect scores (Titanic ≈ 0.78 F1, Housing R² ≈ 0.84).
+- Edge cases: clean dataset → no recommendations; reject-all → execute & benchmark still work; PDF after reject-all.
+- Session restore and deletion.
+
+Frontend: `tsc --noEmit` and `next build` pass for both apps; the landing page was checked with Playwright
+screenshots on desktop and mobile (no console errors, no horizontal overflow).
+
+---
+
+## 14. Known Limitations & Future Work
+
+| Limitation | Possible improvement |
+|---|---|
+| Diagnose / execute / benchmark are synchronous requests (threadpool, not background jobs). | Task queue (Celery/RQ/Arq) + polling or WebSockets with progress. |
+| Locks are in-process; multiple Uvicorn workers wouldn’t share them. | DB row locks or Redis locks. |
+| Client-ID isolation, no accounts. | Real authentication using the reserved `User` table. |
+| Benchmark samples ≤ 2000 rows and uses default hyperparameters. | Configurable sample size, light tuning, holdout test set. |
+| Local disk storage. | S3/GCS object storage with signed URLs. |
+| Gemini availability depends on Google capacity. | Cache explanations per stats signature; background regeneration. |
+| Schema changes rely on additive auto-migration. | Alembic migrations for renames/drops. |
