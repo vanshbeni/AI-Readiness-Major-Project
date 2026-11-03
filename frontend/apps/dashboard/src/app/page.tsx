@@ -12,7 +12,7 @@ import { RecommendationChecklist } from '../components/RecommendationChecklist';
 import { BeforeAfterDiff } from '../components/BeforeAfterDiff';
 import { ModelLeaderboard } from '../components/ModelLeaderboard';
 import { ExportHub } from '../components/ExportHub';
-import { Banner, Eyebrow, Note, Scramble, SkyBand, Underlined } from '../components/ui';
+import { Banner, Eyebrow, Note, Panel, Scramble, SkyBand, Underlined } from '../components/ui';
 import { BenchmarkTerminal } from '../components/Terminal';
 import {
   api,
@@ -41,6 +41,22 @@ function setDatasetInUrl(datasetId: string | null) {
   if (datasetId) url.searchParams.set(DATASET_PARAM, datasetId);
   else url.searchParams.delete(DATASET_PARAM);
   window.history.replaceState(null, '', url.toString());
+}
+
+function LabCta({ href, title, body }: { href: string; title: string; body: string }) {
+  return (
+    <Panel as="a" href={href} lift className="lab-cta">
+      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+        <span className="glyphs" aria-hidden><span>∿</span><span>⁘</span><span>◩</span><span>◈</span></span>
+        <div>
+          <Eyebrow label="visual-lab" />
+          <h3 style={{ marginTop: '.35rem' }}>{title}</h3>
+          <p>{body}</p>
+        </div>
+      </div>
+      <span className="btn btn-dark btn-sm" aria-hidden>Open visual lab <ArrowRight size={14} className="arrow" /></span>
+    </Panel>
+  );
 }
 
 export default function Home() {
@@ -242,7 +258,11 @@ export default function Home() {
       <div className="guides" aria-hidden />
       <SkyBand />
 
-      <Header datasetName={dataset?.filename} onReset={handleReset} />
+      <Header
+        datasetName={dataset?.filename}
+        onReset={handleReset}
+        exploreHref={dataset ? `/explore?${DATASET_PARAM}=${dataset.id}${executionResult ? '&source=cleaned' : ''}` : undefined}
+      />
 
       {dataset && <Stepper currentStep={currentStep} onStepClick={goTo} completedSteps={completedSteps} />}
 
@@ -287,6 +307,13 @@ export default function Home() {
               </div>
 
               <HealthScoreGauge score={diagnostics.health_score} stageName="raw dataset" />
+              {dataset && (
+                <LabCta
+                  href={`/explore?${DATASET_PARAM}=${dataset.id}`}
+                  title="See the data before you fix it"
+                  body="Histograms, 2D and 3D scatter, PCA clusters, correlation and missingness maps."
+                />
+              )}
               {issueCount > 0 && <IssueReceipt issues={diagnostics.issues} />}
               <ProfileTable columns={diagnostics.profile.columns} />
             </div>
@@ -338,6 +365,14 @@ export default function Home() {
 
               {executionResult ? <BeforeAfterDiff result={executionResult} /> : (
                 <Banner tone="info">The cleaning pipeline has not been executed yet.</Banner>
+              )}
+
+              {executionResult && (
+                <LabCta
+                  href={`/explore?${DATASET_PARAM}=${dataset.id}&source=cleaned`}
+                  title="Explore the cleaned dataset"
+                  body="Flip between raw and cleaned in the visual lab to see exactly what changed."
+                />
               )}
 
               {benchmarkLoading && <BenchmarkTerminal problemType={diagnostics?.objective?.problem_type} />}

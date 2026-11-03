@@ -8,6 +8,7 @@ from app.api.v1.endpoints import (
     pipeline,
     benchmarks,
     exports,
+    explore,
 )
 
 api_router = APIRouter()
@@ -20,3 +21,4 @@ api_router.include_router(recommendations.router, prefix="/datasets", tags=["Rec
 api_router.include_router(pipeline.router, prefix="/datasets", tags=["Pipeline Execution"])
 api_router.include_router(benchmarks.router, prefix="/datasets", tags=["Model Benchmarks"])
 api_router.include_router(exports.router, prefix="/datasets", tags=["Exports & Reports"])
+api_router.include_router(explore.router, prefix="/datasets", tags=["Visual Lab"])

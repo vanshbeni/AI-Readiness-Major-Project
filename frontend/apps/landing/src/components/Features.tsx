@@ -145,7 +145,7 @@ export function Features() {
           <Tile
             index="/03"
             title="You hold the switch"
-            desc="Destructive steps are off by default. Toggle anything — go on, these work."
+            desc="Every fix is a switch, and destructive ones are flagged. Toggle anything — go on, these work."
           >
             <ApprovalDemo />
           </Tile>
@@ -154,7 +154,7 @@ export function Features() {
             className="xwide"
             index="/04"
             title="Benchmarks that don't cheat"
-            desc="Scaling, imputation and SMOTE happen inside each cross-validation fold, so the leaderboard reflects what you'd see in production — not a suspicious 1.000."
+            desc="Scaling and SMOTE are fitted inside each cross-validation fold, so the leaderboard reflects what you'd see in production — not a suspicious 1.000."
             delay={80}
           >
             <div className="chips">

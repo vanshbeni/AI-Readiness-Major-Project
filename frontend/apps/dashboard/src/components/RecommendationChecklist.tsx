@@ -14,17 +14,36 @@ interface RecommendationChecklistProps {
   onRegenerateExplanations?: () => Promise<void>;
 }
 
-const EXECUTION_LINES = [
-  'saving approved rules & parameters',
-  'deduplicating rows',
-  'fixing invalid values',
-  'capping outliers',
-  'imputing missing values',
-  'encoding categoricals',
-  're-profiling cleaned dataset',
-  'computing post-cleaning health score',
-  'compiling diffs & export artifacts',
+// Mirrors the executor's safe order; only steps with an approved fix are printed.
+const EXECUTION_STEPS: [string, string][] = [
+  ['missing_target', 'dropping rows without a target'],
+  ['duplicate_rows', 'deduplicating rows'],
+  ['identifier_column', 'dropping identifier columns'],
+  ['unparsed_datetime_feature', 'extracting date parts'],
+  ['unit_mixed_feature', 'splitting values from units'],
+  ['multilabel_delimited_text', 'multi-hot encoding tag lists'],
+  ['invalid_domain_values', 'fixing invalid values'],
+  ['constant_feature', 'dropping low-value columns'],
+  ['high_cardinality_text', 'dropping low-value columns'],
+  ['multicollinear_features', 'dropping low-value columns'],
+  ['statistical_outliers', 'capping outliers'],
+  ['missing_values', 'imputing missing values'],
+  ['rare_categories', 'grouping rare categories'],
+  ['categorical_encoding', 'encoding categoricals'],
 ];
+
+function executionLines(recommendations: RecommendationItem[], approvals: Record<string, boolean>): string[] {
+  const approvedTypes = new Set(
+    recommendations.filter((r) => approvals[r.id] ?? r.is_approved).map((r) => r.issue_type),
+  );
+  return [
+    'saving approved rules & parameters',
+    ...Array.from(new Set(EXECUTION_STEPS.filter(([type]) => approvedTypes.has(type)).map(([, line]) => line))),
+    're-profiling cleaned dataset',
+    'computing post-cleaning health score',
+    'compiling diffs & export artifacts',
+  ];
+}
 
 export const RecommendationChecklist: React.FC<RecommendationChecklistProps> = ({
   recommendations,
@@ -73,7 +92,7 @@ export const RecommendationChecklist: React.FC<RecommendationChecklistProps> = (
           <Terminal
             title="pipeline.log"
             command={`apply --fixes ${approvedCount} --safe-order`}
-            lines={EXECUTION_LINES}
+            lines={executionLines(recommendations, approvals)}
             stepMs={650}
           />
         </div>,

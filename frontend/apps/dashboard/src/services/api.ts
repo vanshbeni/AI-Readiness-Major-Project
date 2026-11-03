@@ -170,6 +170,47 @@ export interface BenchmarkLeaderboard {
   best_model_summary: string;
 }
 
+export type ExploreKind = 'numeric' | 'categorical' | 'datetime' | 'text' | 'id';
+
+export interface ExploreColumn {
+  name: string;
+  kind: ExploreKind;
+  inferred_type: string;
+  is_target: boolean;
+  missing_pct: number;
+  unique: number;
+  included: boolean;
+  numeric_like: boolean;
+  stats?: { min: number; max: number; mean: number; median: number; std: number; q1: number; q3: number; skew: number } | null;
+  top?: { value: string; count: number }[];
+  range?: [string, string];
+}
+
+export interface ExploreProjection {
+  features: string[];
+  dims: number;
+  explained: number[];
+  loadings: { feature: string; weight: number }[][];
+  coords: number[][];
+  clusters: string[] | null;
+  k: number | null;
+  silhouette: number | null;
+}
+
+export interface ExplorePayload {
+  source: 'raw' | 'cleaned';
+  filename: string;
+  has_cleaned: boolean;
+  total_rows: number;
+  sample_rows: number;
+  total_cols: number;
+  target: string | null;
+  columns: ExploreColumn[];
+  data: Record<string, (number | string | null)[]>;
+  correlation: { columns: string[]; pearson: (number | null)[][]; spearman: (number | null)[][] } | null;
+  projection: ExploreProjection | null;
+}
+
 export interface DatasetSession {
   dataset: DatasetSummary;
   sample: DatasetSample;
@@ -319,6 +360,14 @@ export const api = {
 
   executePipeline(datasetId: string): Promise<ExecutionResult> {
     return requestJson(`/datasets/${datasetId}/execute`, { method: 'POST' }, 'Pipeline execution failed');
+  },
+
+  explore(datasetId: string, source: 'raw' | 'cleaned', maxRows = 2000): Promise<ExplorePayload> {
+    return requestJson(
+      `/datasets/${datasetId}/explore?source=${source}&max_rows=${maxRows}`,
+      { cache: 'no-store' },
+      'Failed to load the dataset for visualization',
+    );
   },
 
   runBenchmarks(datasetId: string): Promise<BenchmarkLeaderboard> {

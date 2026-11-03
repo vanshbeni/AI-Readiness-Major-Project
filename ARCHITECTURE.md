@@ -426,6 +426,7 @@ Base URL: `http://localhost:8000/api/v1`. All `/datasets/*` routes require the `
 | GET | `/datasets/{id}/export/pipeline-script` | Standalone Python script | |
 | GET | `/datasets/{id}/export/pdf-report` | PDF audit report | Works even if not executed (“not executed”). |
 | GET | `/datasets/{id}/export/manifest-json` | Machine-readable manifest | params, sources, applied steps, scores. |
+| GET | `/datasets/{id}/explore?source=raw\|cleaned&max_rows=2000&max_cols=60` | Visual lab payload | Sampled typed columns, full-data stats, Pearson + Spearman matrices, PCA (2D/3D) + k-means clusters. 404 for `cleaned` before execution. |
 
 Interactive docs: `http://localhost:8000/docs`.
 
@@ -664,6 +665,17 @@ Builds the PDF with ReportLab:
 - Table of all six sub-scores with **signed** deltas (`+12.5`, `−3.0`).
 - Applied steps (escaped), the leaderboard or a “no benchmarks yet” note.
 
+### 6.10 Visualizer — `visualizer.py`
+
+Read-only builder for the visual lab (`build_explore_payload`):
+
+- Types every column with the profiler and maps it to a chart kind: `numeric`, `categorical`, `datetime`, `text`, `id`.
+- Sends a seeded random sample (default 2,000 rows) as column-oriented arrays; dates become epoch milliseconds.
+- Wide datasets: keeps the target, up to 15 categorical and 5 date columns, then fills with numeric (default 60 columns).
+- Full-data per-column stats, Pearson and Spearman matrices (40 least-missing numeric columns).
+- PCA (up to 3 components, median-impute + standardise, fitted on ≤ 50k rows) with top loadings, plus k-means
+  clusters (k = 2–6 chosen by silhouette) for colouring.
+
 ---
 
 ## 7. Frontend Architecture
@@ -737,6 +749,25 @@ Key behaviours:
 | `BeforeAfterDiff` | Before/after scores, signed delta coloured by sign, honest message, applied steps. |
 | `ModelLeaderboard` | Ranked models, metric, CV folds, summary, empty state. |
 | `ExportHub` | Four download buttons with busy/error states, enabled based on what exists. |
+
+**Visual lab — `app/explore/page.tsx`** (`/explore?dataset=<id>[&source=cleaned]`), opened from the header or the
+call-to-action cards on the health-score and results screens. Nine views, switchable with keys 1–9, all driven by
+one `explore` payload and a global "color by" (any category, numeric gradient or k-means cluster):
+
+| View | Rendering |
+|---|---|
+| Overview | Card per column with mini histogram / top categories |
+| Distribution | Histogram + KDE + box strip, bins slider, log y, split by group; stacked category bars |
+| Scatter 2D | Canvas points, wheel zoom, drag pan, hover tooltip, size encoding, trend line + r |
+| 3D space | Canvas perspective projection, drag-to-orbit with inertia, auto-rotate, depth fog, hover picking |
+| PCA + clusters | 2D or 3D projection, explained variance, loadings |
+| Correlation | Pearson/Spearman heatmap; clicking a cell opens that pair as a scatter |
+| Missingness | Nullity matrix (canvas) with per-column missing bars, sortable rows |
+| Compare groups | Box plots with jittered points per category |
+| Parallel axes | Canvas parallel coordinates with drag-to-filter brushing |
+
+Charts are hand-written SVG/Canvas in `components/viz/` (`lib.ts` scales/binning/KDE/colour, `charts.tsx`,
+`scatter.tsx`); no charting library.
 
 ### 7.3 Landing App (port 3001)
 

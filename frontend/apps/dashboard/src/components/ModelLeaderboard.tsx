@@ -104,7 +104,7 @@ export const ModelLeaderboard: React.FC<ModelLeaderboardProps> = ({ leaderboard 
       </Reveal>
       {leaderboard.models.length > 1 && (
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '-0.75rem' }}>
-          <Note rot={-2} delay={0.3}>all scored on held-out folds, no peeking</Note>
+          <Note rot={-2} delay={0.3}>all scored on held-out folds</Note>
         </div>
       )}
     </div>

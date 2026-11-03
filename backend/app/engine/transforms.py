@@ -18,6 +18,25 @@ def safe_name(value) -> str:
     return re.sub(r"[^a-zA-Z0-9]+", "_", str(value)).strip("_").lower() or "value"
 
 
+def indicator_names(df: pd.DataFrame, column: str, values: list) -> list:
+    """
+    One output column name per value. Distinct values that sanitise to the same name
+    ('Kepler' / 'kepler ', 'A+' / 'A-') get numeric suffixes instead of overwriting each other,
+    and names already present in the frame are never reused.
+    """
+    used = {str(c) for c in df.columns if str(c) != column}
+    names = []
+    for v in values:
+        base = f"{column}_{safe_name(v)}"
+        name, k = base, 2
+        while name in used:
+            name = f"{base}_{k}"
+            k += 1
+        used.add(name)
+        names.append(name)
+    return names
+
+
 def parse_dates(series: pd.Series) -> pd.Series:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -80,8 +99,8 @@ def multi_hot(df: pd.DataFrame, column: str, tokens: list) -> pd.DataFrame:
         return df
     token_sets = df[column].apply(lambda cell: set(split_tokens(cell)))
     df = df.copy()
-    for token in tokens:
-        df[f"{column}_{safe_name(token)}"] = token_sets.apply(lambda s, t=token: 1.0 if t in s else 0.0)
+    for token, name in zip(tokens, indicator_names(df, column, tokens)):
+        df[name] = token_sets.apply(lambda s, t=token: 1.0 if t in s else 0.0)
     return df.drop(columns=[column])
 
 
@@ -126,6 +145,6 @@ def one_hot(df: pd.DataFrame, column: str, categories: list) -> pd.DataFrame:
         return df
     as_text = df[column].astype(str)
     df = df.copy()
-    for cat in categories:
-        df[f"{column}_{safe_name(cat)}"] = (as_text == str(cat)).astype(float)
+    for cat, name in zip(categories, indicator_names(df, column, categories)):
+        df[name] = (as_text == str(cat)).astype(float)
     return df.drop(columns=[column])

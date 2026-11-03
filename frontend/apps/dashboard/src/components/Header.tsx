@@ -1,16 +1,17 @@
 import React, { useEffect, useState } from 'react';
-import { FileSpreadsheet, RotateCcw } from 'lucide-react';
+import { BarChart3, FileSpreadsheet, RotateCcw } from 'lucide-react';
 import { api } from '../services/api';
 
 interface HeaderProps {
   datasetName?: string;
   onReset?: () => void;
+  exploreHref?: string;
 }
 
 const HEALTH_POLL_MS = 15000;
 const LANDING_URL = process.env.NEXT_PUBLIC_LANDING_URL || 'http://localhost:3001';
 
-export const Header: React.FC<HeaderProps> = ({ datasetName, onReset }) => {
+export const Header: React.FC<HeaderProps> = ({ datasetName, onReset, exploreHref }) => {
   const [engineOnline, setEngineOnline] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -53,6 +54,13 @@ export const Header: React.FC<HeaderProps> = ({ datasetName, onReset }) => {
             <i />
             <span>{statusText}</span>
           </span>
+
+          {exploreHref && (
+            <a href={exploreHref} className="btn btn-dark btn-sm" title="Visualize the dataset">
+              <BarChart3 size={13} />
+              Visual lab
+            </a>
+          )}
 
           {onReset && datasetName && (
             <button onClick={onReset} className="btn btn-light btn-sm" title="Upload a new dataset">
