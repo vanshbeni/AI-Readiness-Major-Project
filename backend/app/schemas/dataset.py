@@ -36,8 +36,8 @@ class DatasetSampleResponse(BaseModel):
 
 # --- Objective Schemas ---
 class ObjectiveCreate(BaseModel):
-    problem_type: str = Field(..., description="'classification' or 'regression'")
-    target_column: str
+    problem_type: str = Field(..., description="'classification' | 'regression' | 'clustering' | 'anomaly_detection'")
+    target_column: Optional[str] = ""  # empty for unsupervised tasks
 
 
 class ObjectiveResponse(BaseModel):
@@ -118,6 +118,7 @@ class SubScores(BaseModel):
     validity_score: float
     target_balance_score: float
     feature_quality_score: float
+    signal_score: float = 100.0
 
 
 class HealthScoreResponse(BaseModel):
@@ -141,6 +142,7 @@ class RecommendationItem(BaseModel):
     severity: str
     is_destructive: bool
     is_approved: bool
+    agent_note: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -169,6 +171,9 @@ class ExecutionResponse(BaseModel):
     metric_deltas: List[MetricDelta]
     cleaned_rows: int
     cleaned_cols: int
+    # Post-cleaning self-audit of the exported data: status fixed | open | advice
+    quality_audit: List[Dict[str, Any]] = []
+    data_dictionary: List[Dict[str, Any]] = []
 
 
 # --- Model Benchmark Schemas ---
@@ -184,15 +189,20 @@ class ModelBenchmarkItem(BaseModel):
     is_recommended: bool
     description: str
     suitability: str
+    metric_std: Optional[float] = None
+    is_baseline: bool = False
+    extra: Optional[Dict[str, Any]] = None  # task-specific metrics (clusters, Davies-Bouldin, flagged rows, ...)
 
 
 class ModelBenchmarkLeaderboardResponse(BaseModel):
     dataset_id: str
     problem_type: str
     primary_metric: str
-    cv_folds: int = 3
+    cv_folds: int = 5
     models: List[ModelBenchmarkItem]
     best_model_summary: str
+    # How the benchmark was run: metric, split strategy, rows used / available, and who chose it
+    evaluation: Optional[Dict[str, Any]] = None
 
 
 # --- Combined Diagnostics Response ---

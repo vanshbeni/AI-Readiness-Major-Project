@@ -3,6 +3,7 @@ import re
 from fastapi import Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.models.dataset import (
     Dataset,
@@ -51,7 +52,9 @@ def invalidate_execution(db: Session, db_dataset: Dataset) -> None:
     for job in jobs:
         remove_files(job.script_file_path, job.report_file_path)
         db.delete(job)
-    remove_files(db_dataset.cleaned_file_path)
+    remove_files(db_dataset.cleaned_file_path,
+                 os.path.join(settings.ARTIFACTS_DIR, f"{db_dataset.id}_data_dictionary.json"),
+                 os.path.join(settings.ARTIFACTS_DIR, f"{db_dataset.id}_assignments.csv"))
     db_dataset.cleaned_file_path = None
     db.query(HealthScore).filter(HealthScore.dataset_id == db_dataset.id, HealthScore.stage == "after").delete()
     db.query(ModelBenchmark).filter(ModelBenchmark.dataset_id == db_dataset.id).delete()

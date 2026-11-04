@@ -426,6 +426,13 @@ Base URL: `http://localhost:8000/api/v1`. All `/datasets/*` routes require the `
 | GET | `/datasets/{id}/export/pipeline-script` | Standalone Python script | |
 | GET | `/datasets/{id}/export/pdf-report` | PDF audit report | Works even if not executed (“not executed”). |
 | GET | `/datasets/{id}/export/manifest-json` | Machine-readable manifest | params, sources, applied steps, scores. |
+| GET | `/agents/status` | LLM/agent availability | `configured`, model, fallbacks, privacy mode. |
+| POST | `/datasets/{id}/agents/{kind}` | Start an agent run | `kind` = autopilot \| understand \| clean \| evaluate \| report \| ask (`{question, history, source}`). 409 if another heavy run is active. |
+| GET | `/agent-runs/{run_id}?since=N` | Poll a run | Live trace steps since N, gate (when waiting), result, token usage. |
+| POST | `/agent-runs/{run_id}/resume` | Answer a human gate | `{approvals: {item_id: bool}, answers: {question_id: option_index}}`. |
+| POST | `/agent-runs/{run_id}/cancel` | Cancel a run | |
+| GET | `/datasets/{id}/agents/runs?kind=` | Recent runs | Used to restore the Ask chat. |
+| GET / DELETE | `/datasets/{id}/agents/policy?part=` | Approved agent decisions | Column overrides, evaluation plan, latest report; DELETE resets them. |
 | GET | `/datasets/{id}/explore?source=raw\|cleaned&max_rows=2000&max_cols=60` | Visual lab payload | Sampled typed columns, full-data stats, Pearson + Spearman matrices, PCA (2D/3D) + k-means clusters. 404 for `cleaned` before execution. |
 
 Interactive docs: `http://localhost:8000/docs`.
@@ -676,6 +683,52 @@ Read-only builder for the visual lab (`build_explore_payload`):
 - PCA (up to 3 components, median-impute + standardise, fitted on ≤ 50k rows) with top loadings, plus k-means
   clusters (k = 2–6 chosen by silhouette) for colouring.
 
+### 6.11 Agentic layer — `app/agents/`
+
+**Principle:** agents *decide and explain*; the deterministic engine *computes and executes*; the user *approves*
+anything that changes data. Every agent has a rule-based baseline, so the app works without an LLM key.
+
+```mermaid
+flowchart TD
+    UI[Agent console / Ask panel] -->|start, poll, resume| API[/agents endpoints/]
+    API --> RT[runtime.py<br/>worker pool · live trace · gates · budgets]
+    RT --> AP[orchestrator.py<br/>Autopilot]
+    AP --> U[understand.py] & C[clean.py] & E[evaluate.py] & R[report.py]
+    RT --> A[analyst.py]
+    U & C & E & R & A --> LLM[llm.py<br/>OpenRouter gateway]
+    U & C & E & R & A --> CR[critic.py + facts.py]
+    A --> T[tools.py<br/>DuckDB read-only SQL · stats · charts]
+    U & C & E --> POL[policy.py<br/>DatasetPolicy]
+    AP --> SVC[services/pipeline.py<br/>diagnose · execute · benchmark]
+    POL --> SVC
+```
+
+| Module | Role |
+|---|---|
+| `llm.py` | OpenRouter (OpenAI-compatible) client: `OPENROUTER_MODEL` (default `openrouter/free`) then fallbacks; retry/backoff on 408/429/5xx; fatal on 401/402/403; deadline; token usage; JSON extraction with one repair attempt. |
+| `runtime.py` | `AgentRun` state machine on a thread pool. `RunContext.step()` appends to the live trace; `gate()` pauses (status `waiting`); resume re-invokes the handler with the user's response; cancel; stale runs failed at startup. |
+| `context.py` | Computed evidence: placeholder tokens, sentinel values, currency/thousands/decimal-comma parse rates, day-first evidence, spelling variants, PII patterns, target association (Cramér's V / correlation ratio / \|r\|). Redacted samples depending on `AI_PRIVACY_MODE`. |
+| `policy.py` | Approved column decisions (`na_tokens`, `parse_numeric`, `dayfirst`, `normalize`, `type`, `ignore`) → deterministic prep transforms + type overrides applied in diagnose, execute, explore and target suggestions; prep is written into the exported script. |
+| `understand.py` | Rule candidates + LLM review → validated proposals and ambiguity questions → gate → saved to policy. |
+| `clean.py` | Per recommendation, picks a method from the executable alternatives (e.g. group rare values instead of dropping a predictive column; drop the weaker collinear feature) → gate → recommendations updated (`agent_note`). |
+| `evaluate.py` | Metric (`f1_macro`, `balanced_accuracy`, `accuracy`, `roc_auc`, `average_precision`, `r2`, `mae`, `rmse`), split (`stratified`, `kfold`, `time`), row budget → gate → `eval_plan` used by the benchmark. |
+| `report.py` | Facts gathered from snapshots; LLM writes markdown with `{{F#}}` placeholders only; critic rejects typed numbers; deterministic template fallback. |
+| `analyst.py` + `tools.py` | Plan → tool → observe loop (≤ `AGENT_MAX_STEPS`): `schema`, `sql` (DuckDB, external access disabled, configuration locked, SELECT/WITH only), `stat_test`, `chart`. Results become citable tables `[T#]`/facts `[F#]`. |
+| `critic.py` | Verifies every number in answers against facts (rounding / percent tolerant); one forced revision; stray-number check for reports. |
+| `orchestrator.py` | Autopilot: understand → gate → diagnose → clean → gate → execute → evaluate (auto-applied, shown) → benchmark → report. |
+
+Engine additions used by the agents: `engine/leakage.py` (single-feature leakage screen → `target_leakage`
+issue, `drop_leakage` fix), benchmark `plan` support (metric registry, time-ordered split, row budget, dummy
+baseline, mean ± std, `evaluation` record), `profiler.type_overrides()` context, prep transforms
+(`replace_with_nan`, `parse_numeric`, `map_values`, `parse_dayfirst`).
+
+**Configuration** (`backend/.env`): `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, `OPENROUTER_FALLBACK_MODELS`,
+`LLM_TIMEOUT_SEC`, `AGENT_MAX_STEPS`, `AGENT_RUN_BUDGET_SEC`, `AI_PRIVACY_MODE` (`schema` | `aggregates` | `samples`).
+Explanations also use OpenRouter when the key is set (Gemini remains a legacy fallback).
+
+**Testing:** `backend/tests/agents_e2e.py` runs a fake OpenRouter server plus two backends (LLM mode and rules-only
+mode) and checks every agent, both gates, critic rejections, the exported script and the benchmark plan over HTTP.
+
 ---
 
 ## 7. Frontend Architecture
@@ -765,6 +818,14 @@ one `explore` payload and a global "color by" (any category, numeric gradient or
 | Missingness | Nullity matrix (canvas) with per-column missing bars, sortable rows |
 | Compare groups | Box plots with jittered points per category |
 | Parallel axes | Canvas parallel coordinates with drag-to-filter brushing |
+
+A tenth view, **ask ai** (key 0), is a chat with the Analyst agent (`components/agents/AskPanel.tsx`): live
+trace, markdown answers with `[T#]` citations, a verification badge, generated charts and source tables.
+
+**Agents in the wizard** (`components/agents/`): `AgentDock` on the health-score, recommendations and results
+steps (Autopilot, Understand, Clean, Evaluate, Report); `AgentConsole` slide-in with the live trace, approval
+gates and results; `useAgentRun` polls runs and resumes gates; the header shows whether agents are live or
+rules-only. When a run finishes, the page re-diagnoses or reloads the session so the wizard reflects the change.
 
 Charts are hand-written SVG/Canvas in `components/viz/` (`lib.ts` scales/binning/KDE/colour, `charts.tsx`,
 `scatter.tsx`); no charting library.

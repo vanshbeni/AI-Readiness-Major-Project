@@ -9,6 +9,7 @@ from app.api.v1.endpoints import (
     benchmarks,
     exports,
     explore,
+    agents,
 )
 
 api_router = APIRouter()
@@ -22,3 +23,4 @@ api_router.include_router(pipeline.router, prefix="/datasets", tags=["Pipeline E
 api_router.include_router(benchmarks.router, prefix="/datasets", tags=["Model Benchmarks"])
 api_router.include_router(exports.router, prefix="/datasets", tags=["Exports & Reports"])
 api_router.include_router(explore.router, prefix="/datasets", tags=["Visual Lab"])
+api_router.include_router(agents.router, prefix="", tags=["Agents"])

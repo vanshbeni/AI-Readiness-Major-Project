@@ -2,6 +2,8 @@ from typing import List, Dict, Any
 
 NUMERIC_TYPES = {"numeric", "year_range"}
 CATEGORY_TYPES = {"categorical", "boolean"}
+FLAG_MISSING_PCT = 5.0
+INDICATOR_ONLY_PCT = 70.0
 
 
 def _rec(issue: Dict[str, Any], method_key: str, method: str, reason_title: str, *,
@@ -67,32 +69,75 @@ def select_remediation_methods(
             ctx = dict(column_name=col_name, missing_pct=missing_pct, inferred_type=inferred_type,
                        cardinality=cardinality, skewness=skewness)
 
-            if missing_pct > 70.0:
+            # Whether a value was missing is often informative itself, so any gap large enough to learn from
+            # (min_support rows) keeps a 0/1 record; otherwise filled values would pose as real measurements.
+            missing_cnt = int(details.get("missing_count", 0))
+            total = int(round(missing_cnt * 100 / missing_pct)) if missing_pct else 0
+            flag = missing_pct >= FLAG_MISSING_PCT or missing_cnt >= max(5, -(-total // 100))
+            if missing_pct > INDICATOR_ONLY_PCT:
                 recommendations.append(_rec(
-                    issue, "drop_column_missing", "Drop High-Missingness Column (>70%)",
-                    f"Drop '{col_name}' ({missing_pct}% missing)", is_destructive=True, is_approved=False, **ctx,
+                    issue, "missing_indicator", f"Replace with Presence Indicator 'has_{col_name}'",
+                    f"Keep only whether '{col_name}' was recorded ({missing_pct}% missing is too sparse to fill)", **ctx,
                 ))
             elif inferred_type in NUMERIC_TYPES:
-                if abs(skewness) > 1.0:
-                    recommendations.append(_rec(
-                        issue, "impute_median", "Median Imputation",
-                        f"Impute '{col_name}' using Median (Skewness: {skewness})", **ctx,
-                    ))
-                else:
-                    recommendations.append(_rec(
-                        issue, "impute_mean", "Mean Imputation",
-                        f"Impute '{col_name}' using Mean (Approximately Symmetric)", **ctx,
-                    ))
-            elif inferred_type in CATEGORY_TYPES:
+                recommendations.append(_rec(
+                    issue, "impute_median", "Group-Aware Median Imputation" + (" + Missing Flag" if flag else ""),
+                    f"Impute '{col_name}' with the median (per related group when one exists)"
+                    + (f" and add '{col_name}_was_missing'" if flag else ""),
+                    add_flag=flag, group_by="auto", **ctx,
+                ))
+            elif inferred_type in CATEGORY_TYPES and not flag:
                 recommendations.append(_rec(
                     issue, "impute_mode", "Mode (Most Frequent) Imputation",
-                    f"Impute '{col_name}' with Mode (Low-Cardinality Category)", **ctx,
+                    f"Impute '{col_name}' with Mode ({missing_pct}% missing, low-cardinality category)", **ctx,
                 ))
             else:
+                text_like = inferred_type not in CATEGORY_TYPES
                 recommendations.append(_rec(
-                    issue, "impute_unknown", "Impute with 'Unknown' & Binary Presence Flag",
-                    f"Impute '{col_name}' with 'Unknown' (Preserves Entity Semantics)", **ctx,
+                    issue, "impute_unknown", "Impute with 'Unknown' Category" + (" & Presence Flag" if text_like else ""),
+                    f"Fill '{col_name}' with an explicit 'Unknown' category ({missing_pct}% missing)", add_flag=text_like, **ctx,
                 ))
+
+        elif issue_type in ("disguised_missing", "numeric_stored_as_text", "padded_text"):
+            what = {"disguised_missing": "treat placeholder text as missing",
+                    "numeric_stored_as_text": "read numbers written as text as numbers",
+                    "padded_text": "trim leading/trailing spaces"}[issue_type]
+            recommendations.append(_rec(
+                issue, "auto_prep", "Normalised Automatically Before Profiling",
+                f"Already applied: {what} in '{col_name}' ({details.get('count', 0)} cell(s))",
+                column_name=col_name, count=details.get("count", 0), pct=details.get("pct", 0.0),
+                examples=details.get("examples", []), kind=issue_type,
+            ))
+
+        elif issue_type == "inconsistent_categories":
+            recommendations.append(_rec(
+                issue, "merge_variants", "Merge Spelling / Case Variants",
+                f"Write each value of '{col_name}' one way ({details.get('count', 0)} cell(s) use a variant spelling)",
+                column_name=col_name, count=details.get("count", 0), mapping=details.get("mapping", {}),
+            ))
+
+        elif issue_type == "personal_data":
+            recommendations.append(_rec(
+                issue, "drop_personal_data", "Drop Personal-Data Column",
+                f"Drop '{col_name}' ({details.get('kind', 'personal data').replace('_', ' ')}: privacy risk, no generalisable signal)",
+                is_destructive=True, column_name=col_name, kind=details.get("kind"), unique_count=details.get("unique_count", 0),
+            ))
+
+        elif issue_type == "code_prefix_feature":
+            keep = details.get("keep", [])
+            recommendations.append(_rec(
+                issue, "extract_prefix", "Extract Code Prefix as a Category",
+                f"Create '{col_name}_prefix' from the letter prefix of '{col_name}' ({', '.join(keep[:5])})",
+                column_name=col_name, keep=keep, coverage=details.get("coverage"), sample_values=details.get("sample_values", []),
+            ))
+
+        elif issue_type == "text_token_features":
+            words = details.get("words", [])
+            recommendations.append(_rec(
+                issue, "word_flags", "Extract Frequent Words as 0/1 Features",
+                f"Create {len(words)} word flags from '{col_name}' ({', '.join(words[:5])})",
+                column_name=col_name, words=words, coverage=details.get("coverage"), sample_values=details.get("sample_values", []),
+            ))
 
         elif issue_type == "unparsed_datetime_feature":
             recommendations.append(_rec(
@@ -118,21 +163,32 @@ def select_remediation_methods(
         elif issue_type == "invalid_domain_values":
             neg_cnt = details.get("negative_count", 0)
             recommendations.append(_rec(
-                issue, "replace_negatives_median", "Replace Invalid Negatives with Median",
-                f"Replace {neg_cnt} invalid negative values in '{col_name}' with the median of valid values",
+                issue, "replace_negatives_median", "Treat Invalid Negatives as Missing (then impute + flag)",
+                f"Treat {neg_cnt} invalid negative values in '{col_name}' as blanks and impute them with the other gaps",
                 column_name=col_name, negative_count=neg_cnt, min_value=details.get("min_value", 0.0),
             ))
 
         elif issue_type == "statistical_outliers":
-            lower_b = details.get("lower_bound", 0.0)
-            upper_b = details.get("upper_bound", 0.0)
-            recommendations.append(_rec(
-                issue, "cap_outliers", "IQR Winsorization / Capping (1.5x IQR)",
-                f"Cap outliers in '{col_name}' between [{lower_b}, {upper_b}]",
-                column_name=col_name, outlier_count=details.get("outlier_count", 0),
-                outlier_pct=details.get("outlier_pct", 0.0), lower_bound=lower_b, upper_bound=upper_b,
-                skewness=details.get("skewness", 0.0),
-            ))
+            extreme = int(details.get("extreme_count", 0))
+            common = dict(column_name=col_name, outlier_count=details.get("outlier_count", 0),
+                          outlier_pct=details.get("outlier_pct", 0.0), extreme_count=extreme,
+                          skewness=details.get("skewness", 0.0))
+            if extreme:
+                lower_b, upper_b = details.get("extreme_lower", 0.0), details.get("extreme_upper", 0.0)
+                recommendations.append(_rec(
+                    issue, "cap_outliers", "Cap Extreme Values (3x IQR) + Capped Flag",
+                    f"Cap {extreme} extreme value(s) in '{col_name}' to [{lower_b}, {upper_b}] and flag them",
+                    lower_bound=lower_b, upper_bound=upper_b, add_flag=True, fence="3x IQR", **common,
+                ))
+            else:
+                # Values beyond 1.5x IQR but within 3x IQR are normal tails (fares, incomes): keep them by default.
+                lower_b, upper_b = details.get("lower_bound", 0.0), details.get("upper_bound", 0.0)
+                recommendations.append(_rec(
+                    issue, "cap_outliers", "Optional: Cap Tail Values (1.5x IQR)",
+                    f"Keep {details.get('outlier_count', 0)} tail value(s) in '{col_name}' (no extreme values); capping is optional",
+                    lower_bound=lower_b, upper_bound=upper_b, add_flag=True, fence="1.5x IQR", is_approved=False,
+                    severity="low", **common,
+                ))
 
         elif issue_type == "multicollinear_features":
             col1, col2 = details.get("col1"), details.get("col2")
@@ -142,6 +198,14 @@ def select_remediation_methods(
                 f"Drop '{col2}' (Correlation {corr} with '{col1}')",
                 column=col2, is_destructive=True, is_approved=False, severity="medium",
                 col1=col1, col2=col2, correlation=corr, column_name=col2,
+            ))
+
+        elif issue_type == "target_leakage":
+            recommendations.append(_rec(
+                issue, "drop_leakage", "Drop Leaking Feature",
+                f"Drop '{col_name}' (predicts the target almost perfectly)",
+                is_destructive=True, column_name=col_name, score=details.get("score"),
+                leak_method=details.get("method"), target_column=details.get("target"),
             ))
 
         elif issue_type == "constant_feature":
@@ -156,6 +220,7 @@ def select_remediation_methods(
                 issue, "drop_high_cardinality", "Drop High-Cardinality Free-Text Column",
                 f"Drop '{col_name}' ({uniq} unique values, not usable as a categorical feature)",
                 is_destructive=True, column_name=col_name, unique_count=uniq, unique_pct=details.get("unique_pct", 0.0),
+                supported_categories=details.get("supported_categories"), min_support=details.get("min_support"),
             ))
 
         elif issue_type == "rare_categories":

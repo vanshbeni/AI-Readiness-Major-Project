@@ -53,6 +53,47 @@ class Dataset(Base):
     processing_jobs = relationship("ProcessingJob", back_populates="dataset", cascade="all, delete-orphan")
     benchmarks = relationship("ModelBenchmark", back_populates="dataset", cascade="all, delete-orphan")
     snapshot = relationship("DatasetSnapshot", back_populates="dataset", uselist=False, cascade="all, delete-orphan")
+    policy = relationship("DatasetPolicy", back_populates="dataset", uselist=False, cascade="all, delete-orphan")
+    agent_runs = relationship("AgentRun", back_populates="dataset", cascade="all, delete-orphan")
+
+
+class DatasetPolicy(Base):
+    """
+    Decisions that change how the engine treats a dataset, approved by the user (usually proposed by agents):
+    per-column overrides (type, missing tokens, numeric parsing, day-first dates, ignore), the evaluation plan
+    and the latest generated report.
+    """
+    __tablename__ = "dataset_policies"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    dataset_id = Column(String(36), ForeignKey("datasets.id"), nullable=False, unique=True)
+    column_overrides = Column(JSON, nullable=True)   # {column: {type, na_tokens, parse_numeric, dayfirst, normalize, ignore}}
+    eval_plan = Column(JSON, nullable=True)          # {metric, cv, time_column, max_rows, reason, source}
+    report = Column(JSON, nullable=True)             # {markdown, facts, source, generated_at}
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    dataset = relationship("Dataset", back_populates="policy")
+
+
+class AgentRun(Base):
+    """One agent task: its live trace, an optional human gate it is waiting on, and its result."""
+    __tablename__ = "agent_runs"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    dataset_id = Column(String(36), ForeignKey("datasets.id"), nullable=False, index=True)
+    kind = Column(String(30), nullable=False)        # understand | clean | evaluate | report | ask | autopilot
+    status = Column(String(20), default="queued")    # queued | running | waiting | completed | failed | cancelled
+    input = Column(JSON, nullable=True)
+    steps = Column(JSON, nullable=True)               # [{i, t, actor, kind, text, data}]
+    gate = Column(JSON, nullable=True)                # pending approval / questions
+    state = Column(JSON, nullable=True)               # resumable orchestrator state
+    result = Column(JSON, nullable=True)
+    usage = Column(JSON, nullable=True)               # {calls, prompt_tokens, completion_tokens, models}
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    dataset = relationship("Dataset", back_populates="agent_runs")
 
 
 class DatasetSnapshot(Base):
@@ -139,6 +180,11 @@ class Recommendation(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     dataset = relationship("Dataset", back_populates="recommendations")
+
+    @property
+    def agent_note(self):
+        """Why the Clean agent changed this recommendation, if it did."""
+        return (self.params or {}).get("agent_note")
 
 
 class ProcessingJob(Base):

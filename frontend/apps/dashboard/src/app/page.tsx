@@ -23,7 +23,17 @@ import {
   ExecutionResult,
   BenchmarkLeaderboard,
   Objective,
+  DatasetSession,
+  AgentKind,
+  AgentPolicy,
+  AgentRun,
+  AgentStatus,
+  isUnsupervised,
+  TASK_LABEL,
 } from '../services/api';
+import { AgentConsole } from '../components/agents/AgentConsole';
+import { AgentDock } from '../components/agents/AgentDock';
+import { useAgentRun } from '../components/agents/useAgentRun';
 import { ArrowRight, ArrowLeft, RefreshCw } from 'lucide-react';
 
 const DATASET_PARAM = 'dataset';
@@ -43,18 +53,18 @@ function setDatasetInUrl(datasetId: string | null) {
   window.history.replaceState(null, '', url.toString());
 }
 
-function LabCta({ href, title, body }: { href: string; title: string; body: string }) {
+function LabCta({ href, title, body, label = 'visual-lab', cta = 'Open visual lab' }: { href: string; title: string; body: string; label?: string; cta?: string }) {
   return (
     <Panel as="a" href={href} lift className="lab-cta">
       <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
         <span className="glyphs" aria-hidden><span>∿</span><span>⁘</span><span>◩</span><span>◈</span></span>
         <div>
-          <Eyebrow label="visual-lab" />
+          <Eyebrow label={label} />
           <h3 style={{ marginTop: '.35rem' }}>{title}</h3>
           <p>{body}</p>
         </div>
       </div>
-      <span className="btn btn-dark btn-sm" aria-hidden>Open visual lab <ArrowRight size={14} className="arrow" /></span>
+      <span className="btn btn-dark btn-sm" aria-hidden>{cta} <ArrowRight size={14} className="arrow" /></span>
     </Panel>
   );
 }
@@ -91,6 +101,37 @@ export default function Home() {
     setCurrentStep('upload');
   }, []);
 
+  const applySession = useCallback((s: DatasetSession, step?: StepKey) => {
+    setDataset(s.dataset);
+    setSample(s.sample);
+    setObjective(s.objective ?? null);
+    const diag = s.diagnostics ?? null;
+    setDiagnostics(diag);
+    setApprovals(approvalsFrom(diag));
+    setExecutionResult(s.execution ?? null);
+    setExecutedApprovals(s.execution ? approvalsFrom(diag) : null);
+    setLeaderboard(s.leaderboard ?? null);
+    setCurrentStep(step ?? (s.execution ? 'results' : diag ? 'diagnostic' : 'objective'));
+  }, []);
+
+  // ─── Agents ───
+  const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
+  const [agentPolicy, setAgentPolicy] = useState<AgentPolicy | null>(null);
+  const [consoleOpen, setConsoleOpen] = useState(false);
+
+  useEffect(() => {
+    api.agentStatus().then(setAgentStatus).catch(() => setAgentStatus(null));
+  }, []);
+
+  const refreshPolicy = useCallback((datasetId: string) => {
+    api.getAgentPolicy(datasetId).then(setAgentPolicy).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    if (dataset) refreshPolicy(dataset.id);
+    else setAgentPolicy(null);
+  }, [dataset?.id, refreshPolicy]);
+
   // Restore the session from ?dataset=<id> after a refresh
   useEffect(() => {
     const datasetId = new URLSearchParams(window.location.search).get(DATASET_PARAM);
@@ -99,18 +140,7 @@ export default function Home() {
       return;
     }
     api.getSession(datasetId)
-      .then((s) => {
-        setDataset(s.dataset);
-        setSample(s.sample);
-        setObjective(s.objective ?? null);
-        const diag = s.diagnostics ?? null;
-        setDiagnostics(diag);
-        setApprovals(approvalsFrom(diag));
-        setExecutionResult(s.execution ?? null);
-        setExecutedApprovals(s.execution ? approvalsFrom(diag) : null);
-        setLeaderboard(s.leaderboard ?? null);
-        setCurrentStep(s.execution ? 'results' : diag ? 'diagnostic' : 'objective');
-      })
+      .then((s) => applySession(s))
       .catch((err: unknown) => {
         setDatasetInUrl(null);
         const status = err instanceof ApiError ? err.status : 0;
@@ -232,6 +262,40 @@ export default function Home() {
     if (oldId) api.deleteDataset(oldId).catch(() => undefined);
   };
 
+  // Agents finished: bring the wizard in sync with what they changed
+  const handleAgentFinished = async (run: AgentRun) => {
+    if (run.status !== 'completed') return;
+    const id = run.dataset_id;
+    refreshPolicy(id);
+    try {
+      if (run.kind === 'understand' && run.result?.needs_rediagnose) {
+        const diag = await api.runDiagnostics(id);
+        setDiagnostics(diag);
+        setApprovals(approvalsFrom(diag));
+        setExecutionResult(null);
+        setExecutedApprovals(null);
+        setLeaderboard(null);
+        setCurrentStep('diagnostic');
+      } else if (run.kind === 'clean' && run.result?.changed?.length) {
+        applySession(await api.getSession(id), 'recommendations');
+      } else if (run.kind === 'autopilot') {
+        applySession(await api.getSession(id), 'results');
+        window.scrollTo({ top: 0 });
+      } else if (run.kind === 'evaluate' && run.result?.saved) {
+        runBenchmarks(id);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Could not refresh after the agent run');
+    }
+  };
+  const agent = useAgentRun(handleAgentFinished);
+  const agentBusy = !!agent.run && ['queued', 'running', 'waiting'].includes(agent.run.status);
+  const runAgent = (kind: AgentKind) => {
+    if (!dataset) return;
+    setConsoleOpen(true);
+    agent.start(dataset.id, kind);
+  };
+
   if (restoring) {
     return (
       <div className="app-shell">
@@ -261,7 +325,9 @@ export default function Home() {
       <Header
         datasetName={dataset?.filename}
         onReset={handleReset}
+        agentStatus={agentStatus}
         exploreHref={dataset ? `/explore?${DATASET_PARAM}=${dataset.id}${executionResult ? '&source=cleaned' : ''}` : undefined}
+        summaryHref={dataset && objective ? `/summary?${DATASET_PARAM}=${dataset.id}${executionResult ? '&source=cleaned' : ''}` : undefined}
       />
 
       {dataset && <Stepper currentStep={currentStep} onStepClick={goTo} completedSteps={completedSteps} />}
@@ -291,7 +357,9 @@ export default function Home() {
                       <Scramble text="Here's what's" /> <Underlined>wrong.</Underlined>
                     </h1>
                     <p className="h-sub">
-                      Predicting <strong>{diagnostics.objective?.target_column}</strong> ({diagnostics.objective?.problem_type})
+                      {isUnsupervised(diagnostics.objective?.problem_type)
+                        ? <>Preparing for <strong>{TASK_LABEL[diagnostics.objective!.problem_type]}</strong> (no target)</>
+                        : <>Predicting <strong>{diagnostics.objective?.target_column}</strong> ({diagnostics.objective?.problem_type})</>}
                       {' '}across {diagnostics.profile.summary.row_count.toLocaleString()} rows × {diagnostics.profile.summary.col_count} columns.
                       {' '}{issueCount} issue{issueCount === 1 ? '' : 's'} found.
                     </p>
@@ -306,13 +374,23 @@ export default function Home() {
                 </div>
               </div>
 
-              <HealthScoreGauge score={diagnostics.health_score} stageName="raw dataset" />
+              <AgentDock step="diagnostic" status={agentStatus} policy={agentPolicy} busy={agentBusy} onRun={runAgent} />
+              <HealthScoreGauge score={diagnostics.health_score} stageName="raw dataset" problemType={diagnostics.objective?.problem_type} />
               {dataset && (
-                <LabCta
-                  href={`/explore?${DATASET_PARAM}=${dataset.id}`}
-                  title="See the data before you fix it"
-                  body="Histograms, 2D and 3D scatter, PCA clusters, correlation and missingness maps."
-                />
+                <div className="cta-pair">
+                  <LabCta
+                    href={`/summary?${DATASET_PARAM}=${dataset.id}`}
+                    title="Read the full data story"
+                    body="Every chart, driver and insight on one animated page."
+                    label="summary"
+                    cta="Open summary"
+                  />
+                  <LabCta
+                    href={`/explore?${DATASET_PARAM}=${dataset.id}`}
+                    title="See the data before you fix it"
+                    body="Histograms, 2D and 3D scatter, PCA clusters, correlation and missingness maps."
+                  />
+                </div>
               )}
               {issueCount > 0 && <IssueReceipt issues={diagnostics.issues} />}
               <ProfileTable columns={diagnostics.profile.columns} />
@@ -328,6 +406,9 @@ export default function Home() {
               </div>
               {approvalsChangedSinceRun && (
                 <Banner tone="info">You changed fix approvals since the last run. Apply the fixes again to update the cleaned dataset and model results.</Banner>
+              )}
+              {diagnostics.recommendations.length > 0 && (
+                <AgentDock step="recommendations" status={agentStatus} busy={agentBusy} onRun={runAgent} />
               )}
               <RecommendationChecklist
                 recommendations={diagnostics.recommendations}
@@ -350,7 +431,11 @@ export default function Home() {
                       <Scramble text="Model-ready." /> <Underlined>Proven.</Underlined>
                     </h1>
                     <p className="h-sub">
-                      The before/after quality change, a cross-validated model leaderboard, and everything you need to take it home.
+                      {diagnostics?.objective?.problem_type === 'clustering'
+                        ? 'The before/after quality change, every clustering method compared against a no-structure reference, and the segments found.'
+                        : diagnostics?.objective?.problem_type === 'anomaly_detection'
+                          ? 'The before/after quality change, several anomaly detectors voting, and the rows they agree on, with reasons.'
+                          : 'The before/after quality change, a cross-validated model leaderboard, and everything you need to take it home.'}
                     </p>
                   </div>
                   <button className="btn btn-light" onClick={() => goTo('recommendations')}>
@@ -368,11 +453,20 @@ export default function Home() {
               )}
 
               {executionResult && (
-                <LabCta
-                  href={`/explore?${DATASET_PARAM}=${dataset.id}&source=cleaned`}
-                  title="Explore the cleaned dataset"
-                  body="Flip between raw and cleaned in the visual lab to see exactly what changed."
-                />
+                <div className="cta-pair">
+                  <LabCta
+                    href={`/summary?${DATASET_PARAM}=${dataset.id}&source=cleaned`}
+                    title="The whole story, cleaned"
+                    body="Charts, drivers, model results and the written report together."
+                    label="summary"
+                    cta="Open summary"
+                  />
+                  <LabCta
+                    href={`/explore?${DATASET_PARAM}=${dataset.id}&source=cleaned`}
+                    title="Explore the cleaned dataset"
+                    body="Flip between raw and cleaned in the visual lab to see exactly what changed."
+                  />
+                </div>
               )}
 
               {benchmarkLoading && <BenchmarkTerminal problemType={diagnostics?.objective?.problem_type} />}
@@ -395,11 +489,29 @@ export default function Home() {
               )}
               {leaderboard && !benchmarkLoading && <ModelLeaderboard leaderboard={leaderboard} />}
 
-              <ExportHub datasetId={dataset.id} hasExecution={!!executionResult} hasBenchmarks={!!leaderboard} />
+              {executionResult && (
+                <AgentDock step="results" status={agentStatus} policy={agentPolicy} busy={agentBusy || benchmarkLoading} onRun={runAgent} />
+              )}
+
+              <ExportHub
+                datasetId={dataset.id}
+                hasExecution={!!executionResult}
+                hasBenchmarks={!!leaderboard}
+                hasAssignments={!!leaderboard?.evaluation?.has_assignments}
+                problemType={diagnostics?.objective?.problem_type}
+              />
             </div>
           )}
         </div>
       </main>
+
+      <AgentConsole
+        run={consoleOpen ? agent.run : null}
+        error={consoleOpen ? agent.error : null}
+        onResume={agent.resume}
+        onCancel={agent.cancel}
+        onClose={() => { setConsoleOpen(false); agent.clear(); }}
+      />
     </div>
   );
 }
