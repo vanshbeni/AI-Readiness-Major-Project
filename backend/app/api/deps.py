@@ -61,3 +61,10 @@ def invalidate_execution(db: Session, db_dataset: Dataset) -> None:
     snap = get_snapshot(db, db_dataset.id)
     snap.execution = None
     snap.leaderboard = None
+
+
+def invalidate_augmentation(db: Session, db_dataset: Dataset) -> None:
+    """Drops stored augmentation benchmarks. Does not touch execution or recommendations."""
+    from app.models.dataset import AugmentationRun
+
+    db.query(AugmentationRun).filter(AugmentationRun.dataset_id == db_dataset.id).delete()

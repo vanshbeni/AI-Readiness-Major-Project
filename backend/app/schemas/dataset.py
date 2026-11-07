@@ -1,6 +1,6 @@
 from datetime import datetime
-from typing import List, Dict, Any, Optional
-from pydantic import BaseModel, Field
+from typing import List, Dict, Any, Optional, Literal
+from pydantic import BaseModel, Field, model_validator
 
 
 # --- Dataset Schemas ---
@@ -19,6 +19,7 @@ class DatasetResponse(BaseModel):
     has_profile: bool = False
     has_health_score: bool = False
     has_cleaned_data: bool = False
+    modality: Optional[str] = None
     warnings: List[str] = []
 
     class Config:
@@ -223,3 +224,128 @@ class DatasetSessionResponse(BaseModel):
     diagnostics: Optional[FullDiagnosticResponse] = None
     execution: Optional[ExecutionResponse] = None
     leaderboard: Optional[ModelBenchmarkLeaderboardResponse] = None
+
+
+# --- Augmentation (training folds only; never written into the cleaned CSV) ---
+class TextAugmentOp(BaseModel):
+    name: Literal["swap", "deletion", "insertion", "sentence_shuffle"]
+    alpha: float = Field(0.1, ge=0, le=1)
+
+    model_config = {"extra": "forbid"}
+
+
+class AugmentationRunRequest(BaseModel):
+    modality: Literal["text", "image"]
+    text_column: Optional[str] = None
+    strategy: Literal["balance", "multiply"] = "balance"
+    n_variants: int = Field(2, ge=0, le=10)
+    ops: List[TextAugmentOp] = []
+    seed: int = Field(42, ge=0, le=2_147_483_647)
+    horizontal_flip: bool = True
+    vertical_flip: bool = False
+    max_deg: float = Field(15, ge=0, le=45)
+    brightness: float = Field(0.15, ge=0, le=0.5)
+    contrast: float = Field(0.15, ge=0, le=0.5)
+    noise_std: float = Field(6, ge=0, le=30)
+    crop_scale: float = Field(0.85, ge=0.5, le=1)
+
+    model_config = {"extra": "forbid"}
+
+    @model_validator(mode="after")
+    def _complete(self):
+        if self.modality == "text":
+            if not (self.text_column or "").strip():
+                raise ValueError("text_column is required for text augmentation")
+            if not self.ops:
+                raise ValueError("at least one text operation is required")
+        else:
+            enabled = any([
+                self.horizontal_flip,
+                self.vertical_flip,
+                self.max_deg > 0,
+                self.brightness > 0,
+                self.contrast > 0,
+                self.noise_std > 0,
+                self.crop_scale < 1,
+            ])
+            if not enabled:
+                raise ValueError("enable at least one image operation")
+        return self
+
+
+class AugmentModelScore(BaseModel):
+    model: str
+    baseline_mean: float
+    baseline_std: float
+    augmented_mean: float
+    augmented_std: float
+    delta: float
+    verdict: str
+    is_baseline: bool = False
+
+
+class AugmentFoldAudit(BaseModel):
+    fold: int
+    validation_row_ids: List[int]
+    synthetic_source_ids: List[int]
+
+
+class AugmentationResult(BaseModel):
+    modality: str
+    metric: str
+    seed: int
+    rows_used: int
+    rows_available: int
+    folds: int
+    synthetic_rows: int
+    synthetic_rows_per_fold: List[int]
+    models: List[AugmentModelScore]
+    verdict: str
+    verdict_detail: str
+    evaluation_note: str
+    leakage_audit: List[AugmentFoldAudit]
+    warnings: List[str] = []
+
+
+class AugmentSuggestionItem(BaseModel):
+    id: str
+    title: str
+    detail: str
+    strategy: Optional[str] = None
+    text_column: Optional[str] = None
+
+
+class AugmentTextColumn(BaseModel):
+    name: str
+    non_empty: int
+    median_words: float
+    unique_pct: float
+
+
+class AugmentSuggestions(BaseModel):
+    modality: str
+    target_column: Optional[str] = None
+    problem_type: Optional[str] = None
+    row_count: int
+    class_counts: Dict[str, int] = {}
+    imbalance_ratio: Optional[float] = None
+    text_columns: List[AugmentTextColumn] = []
+    suggestions: List[AugmentSuggestionItem]
+    latest_result: Optional[AugmentationResult] = None
+    latest_config: Optional[Dict[str, Any]] = None
+
+
+class AugmentPreviewItem(BaseModel):
+    source_row_id: int
+    label: str
+    original: Optional[str] = None
+    augmented: Optional[str] = None
+    aug_ops: str = ""
+    original_png: Optional[str] = None
+    augmented_png: Optional[str] = None
+    note: Optional[str] = None
+
+
+class AugmentPreviewResponse(BaseModel):
+    modality: str
+    samples: List[AugmentPreviewItem]

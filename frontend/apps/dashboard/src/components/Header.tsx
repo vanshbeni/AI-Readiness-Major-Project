@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { BarChart3, FileSpreadsheet, RotateCcw, Sparkles } from 'lucide-react';
+import { BarChart3, FileSpreadsheet, RotateCcw, Sparkles, Shuffle } from 'lucide-react';
 import { api, AgentStatus } from '../services/api';
 
 interface HeaderProps {
@@ -7,13 +7,14 @@ interface HeaderProps {
   onReset?: () => void;
   exploreHref?: string;
   summaryHref?: string;
+  augmentHref?: string;
   agentStatus?: AgentStatus | null;
 }
 
 const HEALTH_POLL_MS = 15000;
 const LANDING_URL = process.env.NEXT_PUBLIC_LANDING_URL || 'http://localhost:3001';
 
-export const Header: React.FC<HeaderProps> = ({ datasetName, onReset, exploreHref, summaryHref, agentStatus }) => {
+export const Header: React.FC<HeaderProps> = ({ datasetName, onReset, exploreHref, summaryHref, augmentHref, agentStatus }) => {
   const [engineOnline, setEngineOnline] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -71,6 +72,13 @@ export const Header: React.FC<HeaderProps> = ({ datasetName, onReset, exploreHre
             <a href={summaryHref} className="btn btn-light btn-sm" title="Every chart and insight on one page">
               <Sparkles size={13} />
               Summary
+            </a>
+          )}
+
+          {augmentHref && (
+            <a href={augmentHref} className="btn btn-light btn-sm" title="Augment training rows only">
+              <Shuffle size={13} />
+              Augment
             </a>
           )}
 

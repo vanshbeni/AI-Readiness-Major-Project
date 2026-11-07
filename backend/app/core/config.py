@@ -40,9 +40,12 @@ class Settings(BaseSettings):
     RAW_DATA_DIR: str = str(BASE_DIR / "uploads" / "raw")
     CLEANED_DATA_DIR: str = str(BASE_DIR / "uploads" / "cleaned")
     ARTIFACTS_DIR: str = str(BASE_DIR / "uploads" / "artifacts")
+    IMAGES_DIR: str = str(BASE_DIR / "uploads" / "images")
 
     # Upload limits & retention
     MAX_UPLOAD_MB: int = 200
+    MAX_IMAGE_ZIP_MB: int = 100
+    MAX_IMAGES: int = 2000
     MIN_ROWS: int = 10
     FILE_RETENTION_DAYS: int = 7
 
@@ -59,3 +62,11 @@ os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
 os.makedirs(settings.RAW_DATA_DIR, exist_ok=True)
 os.makedirs(settings.CLEANED_DATA_DIR, exist_ok=True)
 os.makedirs(settings.ARTIFACTS_DIR, exist_ok=True)
+os.makedirs(settings.IMAGES_DIR, exist_ok=True)
+
+try:
+    from PIL import Image
+
+    Image.MAX_IMAGE_PIXELS = 20_000_000
+except ImportError:
+    pass

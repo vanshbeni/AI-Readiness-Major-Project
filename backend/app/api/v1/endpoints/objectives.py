@@ -4,7 +4,7 @@ import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_owned_dataset, get_snapshot, invalidate_execution
+from app.api.deps import get_owned_dataset, get_snapshot, invalidate_augmentation, invalidate_execution
 from app.core.database import get_db
 from app.agents.policy import column_overrides, load_prepared, prepare, type_map
 from app.core.storage import read_dataset
@@ -129,6 +129,7 @@ def set_objective(
         db.query(ProfileReport).filter(ProfileReport.dataset_id == dataset_id).delete()
         db.query(HealthScore).filter(HealthScore.dataset_id == dataset_id, HealthScore.stage == "before").delete()
         invalidate_execution(db, db_dataset)
+        invalidate_augmentation(db, db_dataset)
         get_snapshot(db, dataset_id).diagnostics = None
 
     if existing:

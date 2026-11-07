@@ -3,6 +3,7 @@ import io
 import math
 import os
 import re
+import shutil
 import threading
 import time
 import logging
@@ -169,6 +170,15 @@ def cleanup_expired_files() -> int:
                 continue
             if os.path.getmtime(path) < cutoff:
                 remove_files(path)
+                removed += 1
+    images_root = settings.IMAGES_DIR
+    if os.path.isdir(images_root):
+        for name in os.listdir(images_root):
+            path = os.path.join(images_root, name)
+            if name == ".gitkeep" or not os.path.isdir(path):
+                continue
+            if os.path.getmtime(path) < cutoff:
+                shutil.rmtree(path, ignore_errors=True)
                 removed += 1
     return removed
 

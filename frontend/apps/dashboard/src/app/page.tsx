@@ -195,6 +195,10 @@ export default function Home() {
     try {
       const obj = await api.setObjective(dataset.id, problemType, targetColumn);
       setObjective(obj);
+      if (dataset.modality === 'image') {
+        window.location.href = `/augment?${DATASET_PARAM}=${dataset.id}`;
+        return;
+      }
       setDiagnostics(null);
       setExecutionResult(null);
       setExecutedApprovals(null);
@@ -326,6 +330,7 @@ export default function Home() {
         datasetName={dataset?.filename}
         onReset={handleReset}
         agentStatus={agentStatus}
+        augmentHref={dataset ? `/augment?${DATASET_PARAM}=${dataset.id}` : undefined}
         exploreHref={dataset ? `/explore?${DATASET_PARAM}=${dataset.id}${executionResult ? '&source=cleaned' : ''}` : undefined}
         summaryHref={dataset && objective ? `/summary?${DATASET_PARAM}=${dataset.id}${executionResult ? '&source=cleaned' : ''}` : undefined}
       />
@@ -465,6 +470,13 @@ export default function Home() {
                     href={`/explore?${DATASET_PARAM}=${dataset.id}&source=cleaned`}
                     title="Explore the cleaned dataset"
                     body="Flip between raw and cleaned in the visual lab to see exactly what changed."
+                  />
+                  <LabCta
+                    href={`/augment?${DATASET_PARAM}=${dataset.id}`}
+                    title="Augment the training rows"
+                    body="Compare a baseline with a training-only augmented set. The cleaned file is left as it is."
+                    label="augmentation"
+                    cta="Open augmentation"
                   />
                 </div>
               )}

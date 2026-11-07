@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { ArrowUpRight, Loader2, UploadCloud } from 'lucide-react';
-import { api, DatasetSummary, DatasetSample, MAX_UPLOAD_MB, SUPPORTED_EXTENSIONS } from '../services/api';
+import { api, DatasetSummary, DatasetSample, MAX_IMAGE_ZIP_MB, MAX_UPLOAD_MB, SUPPORTED_EXTENSIONS } from '../services/api';
 import { Banner, Eyebrow, Note, Panel, Reveal, Scramble, Underlined, trackPointer } from './ui';
 
 interface UploadStepProps {
@@ -42,6 +42,7 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onDatasetLoaded }) => {
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   const validateFile = (file: File): string | null => {
     const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
@@ -66,6 +67,29 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onDatasetLoaded }) => {
       onDatasetLoaded(dataset, sample);
     } catch (err: any) {
       setError(err.message || 'Failed to upload dataset');
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  const handleImageUpload = async (file: File) => {
+    if (loading) return;
+    if (!file.name.toLowerCase().endsWith('.zip')) {
+      setError('Image datasets must be a .zip file.');
+      return;
+    }
+    if (file.size > MAX_IMAGE_ZIP_MB * 1024 * 1024) {
+      setError(`Zip is larger than the ${MAX_IMAGE_ZIP_MB} MB limit.`);
+      return;
+    }
+    try {
+      setLoading(`reading images in ${file.name}`);
+      setError(null);
+      const dataset = await api.uploadImages(file);
+      const sample = await api.getSample(dataset.id);
+      onDatasetLoaded(dataset, sample);
+    } catch (err: any) {
+      setError(err.message || 'Failed to upload images');
     } finally {
       setLoading(null);
     }
@@ -159,6 +183,23 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onDatasetLoaded }) => {
         <Note className="float-note" tone="purple" arrow="left" rot={-7} delay={1.2} style={{ position: 'absolute', right: '-2.5rem', top: '-1.6rem' }}>
           your file stays yours
         </Note>
+      </div>
+
+      <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'center' }}>
+        <input
+          type="file"
+          ref={imageInputRef}
+          accept=".zip,application/zip"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = '';
+            if (file) handleImageUpload(file);
+          }}
+        />
+        <button className="btn btn-light" type="button" disabled={!!loading} onClick={() => imageInputRef.current?.click()}>
+          Image dataset (.zip)
+        </button>
       </div>
 
       <div style={{ marginTop: '3.5rem' }}>

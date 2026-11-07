@@ -1,4 +1,5 @@
 import os
+import shutil
 import uuid
 from typing import List
 
@@ -7,7 +8,7 @@ import pandas as pd
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_client_id, get_owned_dataset
+from app.api.deps import get_client_id, get_owned_dataset, invalidate_augmentation
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.storage import (
@@ -19,6 +20,8 @@ from app.core.storage import (
     remove_files,
     sanitize_filename,
 )
+from app.engine.augment_image import read_image_archive
+from app.engine.augment_text import AugmentError
 from app.models.dataset import Dataset, DatasetSnapshot, HealthScore, Objective, ProcessingJob, ProfileReport, Recommendation
 from app.schemas.dataset import (
     DatasetResponse,
@@ -128,6 +131,7 @@ def build_dataset_response(db: Session, ds: Dataset, warnings: List[str] = None)
         has_profile=db.query(ProfileReport).filter(ProfileReport.dataset_id == ds.id).count() > 0,
         has_health_score=db.query(HealthScore).filter(HealthScore.dataset_id == ds.id, HealthScore.stage == "before").count() > 0,
         has_cleaned_data=bool(ds.cleaned_file_path and os.path.exists(ds.cleaned_file_path)),
+        modality=ds.modality,
         warnings=warnings or [],
     )
 
@@ -192,6 +196,59 @@ def upload_dataset(
         raise HTTPException(status_code=400, detail=str(e))
 
     return _store_dataset(db, df, filename, len(content), client_id, warnings)
+
+
+@router.post("/upload-images", response_model=DatasetResponse, status_code=status.HTTP_201_CREATED)
+def upload_images(
+    file: UploadFile = File(...),
+    client_id: str = Depends(get_client_id),
+    db: Session = Depends(get_db),
+):
+    """Stores a zip of labeled images. The tabular upload route is unchanged."""
+    filename = sanitize_filename(file.filename)
+    if os.path.splitext(filename)[1].lower() != ".zip":
+        raise HTTPException(status_code=400, detail="Upload a .zip of images.")
+    max_bytes = settings.MAX_IMAGE_ZIP_MB * 1024 * 1024
+    content = file.file.read(max_bytes + 1)
+    if len(content) > max_bytes:
+        raise HTTPException(status_code=413, detail=f"Zip is larger than the {settings.MAX_IMAGE_ZIP_MB} MB limit.")
+    try:
+        records, warnings = read_image_archive(content, settings.MAX_IMAGES)
+    except AugmentError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    dataset_id = str(uuid.uuid4())
+    image_dir = os.path.join(settings.IMAGES_DIR, dataset_id)
+    raw_path = os.path.join(settings.RAW_DATA_DIR, f"{dataset_id}.csv")
+    os.makedirs(image_dir, exist_ok=True)
+    try:
+        rows = []
+        for record in records:
+            path = os.path.join(image_dir, record["filename"])
+            with open(path, "wb") as handle:
+                handle.write(record["png"])
+            rows.append({"image_path": path, "label": record["label"]})
+        pd.DataFrame(rows).to_csv(raw_path, index=False)
+        db_dataset = Dataset(
+            id=dataset_id,
+            owner_token=client_id,
+            filename=filename,
+            file_size_bytes=len(content),
+            raw_file_path=raw_path,
+            row_count=len(rows),
+            col_count=2,
+            modality="image",
+            image_dir_path=image_dir,
+        )
+        db.add(db_dataset)
+        db.commit()
+        db.refresh(db_dataset)
+    except Exception:
+        db.rollback()
+        shutil.rmtree(image_dir, ignore_errors=True)
+        remove_files(raw_path)
+        raise HTTPException(status_code=500, detail="Failed to save the image dataset. Please try again.")
+    return build_dataset_response(db, db_dataset, warnings)
 
 
 @router.post("/demo/{demo_key}", response_model=DatasetResponse, status_code=status.HTTP_201_CREATED)
@@ -259,7 +316,18 @@ def delete_dataset(
     jobs = db.query(ProcessingJob).filter(ProcessingJob.dataset_id == dataset_id).all()
     files = [db_dataset.raw_file_path, db_dataset.cleaned_file_path]
     files += [p for j in jobs for p in (j.script_file_path, j.report_file_path)]
+    image_dir = db_dataset.image_dir_path or os.path.join(settings.IMAGES_DIR, dataset_id)
+    invalidate_augmentation(db, db_dataset)
     db.delete(db_dataset)
     db.commit()
     remove_files(*files)
     remove_files(os.path.join(settings.ARTIFACTS_DIR, f"{dataset_id}_audit_report.pdf"))
+    if image_dir and os.path.isdir(image_dir):
+        root = os.path.abspath(settings.IMAGES_DIR)
+        candidate = os.path.abspath(image_dir)
+        try:
+            inside = os.path.commonpath([root, candidate]) == root
+        except ValueError:
+            inside = False
+        if inside:
+            shutil.rmtree(candidate, ignore_errors=True)

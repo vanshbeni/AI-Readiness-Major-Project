@@ -55,6 +55,9 @@ class Dataset(Base):
     snapshot = relationship("DatasetSnapshot", back_populates="dataset", uselist=False, cascade="all, delete-orphan")
     policy = relationship("DatasetPolicy", back_populates="dataset", uselist=False, cascade="all, delete-orphan")
     agent_runs = relationship("AgentRun", back_populates="dataset", cascade="all, delete-orphan")
+    augmentation_runs = relationship("AugmentationRun", back_populates="dataset", cascade="all, delete-orphan")
+    modality = Column(String(16), nullable=True)
+    image_dir_path = Column(String(512), nullable=True)
 
 
 class DatasetPolicy(Base):
@@ -221,3 +224,16 @@ class ModelBenchmark(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     dataset = relationship("Dataset", back_populates="benchmarks")
+
+
+class AugmentationRun(Base):
+    """One augmentation benchmark. Config and result are stored; rows are never written into the cleaned CSV."""
+    __tablename__ = "augmentation_runs"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    dataset_id = Column(String(36), ForeignKey("datasets.id"), nullable=False, index=True)
+    config = Column(JSON, nullable=True)
+    result = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    dataset = relationship("Dataset", back_populates="augmentation_runs")

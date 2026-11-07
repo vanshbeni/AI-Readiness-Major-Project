@@ -1330,6 +1330,11 @@ a { color: inherit; text-decoration: none; }
   .sum-nav { top: 56px; }
 }
 
+.augment-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+@media (max-width: 720px) {
+  .augment-pair { grid-template-columns: 1fr; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .histbars-bar, .bs-whisker, .bs-box, .bs-median { transform: none !important; }
   .barlist-track i { width: var(--w) !important; }

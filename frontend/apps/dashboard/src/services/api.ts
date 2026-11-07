@@ -2,6 +2,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/a
 const CLIENT_ID_KEY = 'drp_client_id';
 
 export const MAX_UPLOAD_MB = 200;
+export const MAX_IMAGE_ZIP_MB = 100;
 export const SUPPORTED_EXTENSIONS = ['.csv', '.xlsx', '.xls'];
 
 export interface DatasetSummary {
@@ -15,7 +16,104 @@ export interface DatasetSummary {
   has_profile: boolean;
   has_health_score: boolean;
   has_cleaned_data: boolean;
+  modality?: string | null;
   warnings?: string[];
+}
+
+export type AugmentOpName = 'swap' | 'deletion' | 'insertion' | 'sentence_shuffle';
+
+export interface AugmentOp {
+  name: AugmentOpName;
+  alpha: number;
+}
+
+export interface AugmentConfig {
+  modality: 'text' | 'image';
+  text_column?: string | null;
+  strategy: 'balance' | 'multiply';
+  n_variants: number;
+  ops: AugmentOp[];
+  seed: number;
+  horizontal_flip: boolean;
+  vertical_flip: boolean;
+  max_deg: number;
+  brightness: number;
+  contrast: number;
+  noise_std: number;
+  crop_scale: number;
+}
+
+export interface AugmentSuggestionItem {
+  id: string;
+  title: string;
+  detail: string;
+  strategy?: string | null;
+  text_column?: string | null;
+}
+
+export interface AugmentSuggestions {
+  modality: string;
+  target_column?: string | null;
+  problem_type?: string | null;
+  row_count: number;
+  class_counts: Record<string, number>;
+  imbalance_ratio?: number | null;
+  text_columns: { name: string; non_empty: number; median_words: number; unique_pct: number }[];
+  suggestions: AugmentSuggestionItem[];
+  latest_result?: AugmentResult | null;
+  latest_config?: AugmentConfig | null;
+}
+
+export interface AugmentModelScore {
+  model: string;
+  baseline_mean: number;
+  baseline_std: number;
+  augmented_mean: number;
+  augmented_std: number;
+  delta: number;
+  verdict: string;
+  is_baseline: boolean;
+}
+
+export interface AugmentResult {
+  modality: string;
+  metric: string;
+  seed: number;
+  rows_used: number;
+  rows_available: number;
+  folds: number;
+  synthetic_rows: number;
+  synthetic_rows_per_fold: number[];
+  models: AugmentModelScore[];
+  verdict: string;
+  verdict_detail: string;
+  evaluation_note: string;
+  warnings: string[];
+}
+
+export interface AugmentPreviewSample {
+  source_row_id: number;
+  label: string;
+  original?: string | null;
+  augmented?: string | null;
+  aug_ops: string;
+  original_png?: string | null;
+  augmented_png?: string | null;
+  note?: string | null;
+}
+
+export interface AugmentPreview {
+  modality: string;
+  samples: AugmentPreviewSample[];
+}
+
+export interface AugmentManifest {
+  seed: number;
+  counts_before: Record<string, number>;
+  counts_after_train: Record<string, number>;
+  split: { train_original: number; train_synthetic: number; holdout: number };
+  warnings: string[];
+  library_versions: Record<string, string>;
 }
 
 export interface DatasetSample {
@@ -532,6 +630,27 @@ function filenameFromDisposition(header: string | null): string | null {
 
 const jsonHeaders = { 'Content-Type': 'application/json' };
 
+function augmentQuery(config: AugmentConfig, n?: number): string {
+  const params = new URLSearchParams();
+  if (n) params.set('n', String(n));
+  params.set('strategy', config.strategy);
+  params.set('n_variants', String(config.n_variants));
+  params.set('seed', String(config.seed));
+  if (config.modality === 'text') {
+    params.set('text_column', config.text_column || '');
+    params.set('ops', config.ops.map((op) => `${op.name}:${op.alpha}`).join(','));
+  } else {
+    params.set('horizontal_flip', String(config.horizontal_flip));
+    params.set('vertical_flip', String(config.vertical_flip));
+    params.set('max_deg', String(config.max_deg));
+    params.set('brightness', String(config.brightness));
+    params.set('contrast', String(config.contrast));
+    params.set('noise_std', String(config.noise_std));
+    params.set('crop_scale', String(config.crop_scale));
+  }
+  return params.toString();
+}
+
 export const api = {
   async checkHealth(): Promise<boolean> {
     try {
@@ -546,6 +665,36 @@ export const api = {
     const formData = new FormData();
     formData.append('file', file);
     return requestJson('/datasets/upload', { method: 'POST', body: formData }, 'Upload failed');
+  },
+
+  uploadImages(file: File): Promise<DatasetSummary> {
+    const formData = new FormData();
+    formData.append('file', file);
+    return requestJson('/datasets/upload-images', { method: 'POST', body: formData }, 'Image upload failed');
+  },
+
+  augmentSuggestions(datasetId: string): Promise<AugmentSuggestions> {
+    return requestJson(`/datasets/${datasetId}/augmentation/suggestions`, { cache: 'no-store' }, 'Failed to load augmentation suggestions');
+  },
+
+  augmentPreview(datasetId: string, config: AugmentConfig, n = 4): Promise<AugmentPreview> {
+    return requestJson(
+      `/datasets/${datasetId}/augmentation/preview?${augmentQuery(config, n)}`,
+      { cache: 'no-store' },
+      'Failed to preview augmentation',
+    );
+  },
+
+  augmentRun(datasetId: string, config: AugmentConfig): Promise<AugmentResult> {
+    return requestJson(
+      `/datasets/${datasetId}/augmentation/run`,
+      { method: 'POST', headers: jsonHeaders, body: JSON.stringify(config) },
+      'Augmentation benchmark failed',
+    );
+  },
+
+  augmentManifest(datasetId: string): Promise<AugmentManifest> {
+    return requestJson(`/datasets/${datasetId}/export/augmented-manifest`, { cache: 'no-store' }, 'Failed to build the augmentation manifest');
   },
 
   loadDemoDataset(demoKey: string): Promise<DatasetSummary> {
@@ -672,6 +821,19 @@ export const api = {
     const a = document.createElement('a');
     a.href = url;
     a.download = filenameFromDisposition(res.headers.get('Content-Disposition')) || fallbackName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  },
+
+  async downloadAugmentedTrain(datasetId: string): Promise<void> {
+    const res = await request(`/datasets/${datasetId}/export/augmented-train`, {}, 'Download failed');
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filenameFromDisposition(res.headers.get('Content-Disposition')) || 'augmented_train.zip';
     document.body.appendChild(a);
     a.click();
     a.remove();
