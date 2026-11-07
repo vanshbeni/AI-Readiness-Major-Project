@@ -131,7 +131,7 @@ export function Features() {
           <Tile
             index="/02"
             title="Explained like a colleague would"
-            desc="Gemini writes the why, grounded only in your computed stats. If it's down, deterministic explanations take over."
+            desc="An LLM via OpenRouter writes the why, grounded only in your computed stats. If it's down, deterministic explanations take over."
             delay={80}
           >
             <div className="chips">

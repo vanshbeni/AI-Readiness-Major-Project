@@ -27,17 +27,20 @@ These are worse than "not configurable": they produce wrong output or false clai
 
 | Status | Problem | Where |
 |---|---|---|
-| **Fixed** | One-hot and multi-hot indicator columns could **overwrite each other**: `safe_name()` maps `"Kepler"` / `"kepler "` and `"A+"` / `"A-"` to the same name, so the second category's indicator silently replaced the first. Names are now de-duplicated (`indicator_names`); the exported script inherits the fix. | `transforms.py:17-37, 102, 148` |
+| **Fixed** | One-hot and multi-hot indicator columns could **overwrite each other**: `safe_name()` maps `"Kepler"` / `"kepler "` and `"A+"` / `"A-"` to the same name, so the second category's indicator silently replaced the first. Names are now de-duplicated (`indicator_names`); the exported script inherits the fix. | `transforms.py:31-47, 112, 159` |
+| **Fixed** | **Date features were never created.** pandas 3 reads text as `StringDtype`, but the detector checked `series.dtype == object` (always false), so date columns were never parsed and the benchmark later dropped them as high-cardinality text. A time-ordered regression went from R² −0.02 to 0.995 after the fix. | `detector.py:126-130` |
+| **Fixed** | Mixed time-zone timestamps failed to parse and were one-hot encoded as junk; version strings (`1.2.3`) were typed as dates. Now `utc=True` everywhere, plus a version-string guard. | `profiler.py:18, 99-111`, `transforms.py:50-54` |
+| **Fixed** | Generated columns (`X_year`/`_month`/`_day`, `X_value`/`_unit`, `has_X`) overwrote existing columns with the same name. Now suffixed via `fresh_name()`. | `transforms.py:21-28` |
 | **Fixed** | Landing page claimed "destructive steps are off by default". Four of the six destructive fixes (`drop_identifier`, `drop_missing_target`, `drop_constant`, `drop_high_cardinality`) are approved by default; only "drop >70% missing" and "drop collinear" start off. Copy corrected. Defaults themselves are still a policy decision (see §4). | `rules.py:8`, `landing/.../Features.tsx:148` |
 | **Fixed** | Landing page and leaderboard claimed imputation happens inside CV folds / "no peeking". Approved cleaning fixes (imputation, capping, rare grouping) are fitted on **all** rows before benchmarking; only scaling, SMOTE and leftover-NaN imputation are per fold. Copy corrected. Real fix: §5. | `Features.tsx:157`, `ModelLeaderboard.tsx` |
 | **Fixed** | The "pipeline.log" terminal always printed "capping outliers" / "encoding categoricals" even when those fixes were switched off. It now lists only approved steps, in executor order. | `RecommendationChecklist.tsx` |
 | Open | **Regression gets 15 free points**: target balance is always 100 for regression, so classification and regression scores aren't comparable. | `scorer.py:62-67` |
-| Open | **Score cliff**: imbalance ratio 2.99 → balance 100; ratio 3.0 → 76 (detection starts at 3.0, penalty is `(ratio−1)×12`). | `detector.py:270`, `scorer.py:65` |
-| Open | **Annual time series lose their year column**: an all-unique, consecutive-integer column with > 20 rows is typed `id` *before* the year check runs, so `Year = 1990…2023` is dropped as an identifier. | `profiler.py:61-64` vs `:76` |
-| Open | **Type inference reads only the first 60 values**, so a file sorted by date or starting with 60 placeholder rows is misclassified. | `profiler.py:94` |
+| Open | **Score cliff**: imbalance ratio 2.99 → balance 100; ratio 3.0 → 76 (detection starts at 3.0, penalty is `(ratio−1)×12`). | `detector.py:274`, `scorer.py:65` |
+| Open | **Annual time series lose their year column**: an all-unique, consecutive-integer column with > 20 rows is typed `id` *before* the year check runs, so `Year = 1990…2023` is dropped as an identifier. | `profiler.py:63-66` vs `:78` |
+| Open | **Type inference reads only the first 60 values**, so a file sorted by date or starting with 60 placeholder rows is misclassified. | `profiler.py:96` |
 | Open | **Disguised missing values** (`"?"`, `"-"`, `"unknown"`, `-999`, `9999`) are treated as real data. | `storage.py:83` (default `na_values`) |
 | Open | **Leading zeros lost**: zip / account codes like `00123` become `123` because pandas infers dtypes at ingest. | `storage.py:83, 122` |
-| Open | **Day/month ambiguity**: `03/04/2021` is always read month-first (no `dayfirst`); version strings like `1.2.3` can parse as dates. | `profiler.py:97-103`, `transforms.py:21-24` |
+| Open | **Day/month ambiguity**: `03/04/2021` is always read month-first (no `dayfirst`); on a `dd/mm/yyyy` column 77 of 200 rows got the wrong month. | `profiler.py:99-111`, `transforms.py:50-54` |
 | Open | Years are mean-imputed (`year_range` is in `NUMERIC_TYPES`), producing values like `2011.37`. | `rules.py:3, 75` |
 | Open | XGBoost and Gradient Boosting get **no class weighting** while the other models do, so the comparison is unequal when weights are enabled. | `benchmark.py:121, 130` |
 | Open | Real cell values (`sample_values`, `majority_class`) are sent to Google with no privacy switch. | `rules.py:101, 108, 115` → `explainer.py:220-240` |
@@ -78,13 +81,13 @@ Severity tags used below:
 | `:19` | High-cardinality ratio `> 0.40` | Magic. **[low]** | Profile setting. |
 | `:88-95` | Missing severity bands 50 / 20 / 5 % | Fixed. **[low]** | Profile setting. |
 | `:42` | Duplicate severity 5 / 1 % | Fixed. **[low]** | Profile setting. |
-| `:199-207` | Outliers = **1.5 × IQR**, flagged only if > 1% of rows | Wrong for heavy-tailed data (income, prices, counts): flags thousands of legitimate values, then caps them. **[high]** | Offer IQR k (1.5/3.0), z-score, MAD, or "log-transform first"; skip capping for known heavy-tailed distributions (skew > 2). |
-| `:246` | Multicollinearity `|r| > 0.85`, Pearson only | Misses non-linear redundancy; 0.85 is arbitrary. **[med]** | Configurable threshold; add Spearman / VIF. |
-| `:250` | Only the top **5** correlated pairs are reported | Wide datasets with 30 redundant pairs only see 5. **[med]** | Report all above threshold (paginate in UI). |
-| `:270-275` | Imbalance: ratio ≥ 3 flagged; ≥ 5 high; ≥ 10 or > 90% critical | Fixed. **[low]** | Profile setting. |
+| `:203-211` | Outliers = **1.5 × IQR**, flagged only if > 1% of rows | Wrong for heavy-tailed data (income, prices, counts): flags thousands of legitimate values, then caps them. **[high]** | Offer IQR k (1.5/3.0), z-score, MAD, or "log-transform first"; skip capping for known heavy-tailed distributions (skew > 2). |
+| `:250` | Multicollinearity `|r| > 0.85`, Pearson only | Misses non-linear redundancy; 0.85 is arbitrary. **[med]** | Configurable threshold; add Spearman / VIF. |
+| `:254` | Only the top **5** correlated pairs are reported | Wide datasets with 30 redundant pairs only see 5. **[med]** | Report all above threshold (paginate in UI). |
+| `:274-279` | Imbalance: ratio ≥ 3 flagged; ≥ 5 high; ≥ 10 or > 90% critical | Fixed. **[low]** | Profile setting. |
 | `:115` | Constant feature = exactly 1 non-null unique value | A column that is 99.9% one value is never flagged; a 99%-NaN column with one value is called "constant" although *whether it is filled* may be signal. **[med]** | Dominant-value share threshold (e.g. ≥ 0.99); treat NaN as a value. |
-| `:202` | Outliers skipped when IQR = 0 | Zero-inflated columns (85% zeros) never get checked. **[med]** | Fall back to MAD / percentiles. |
-| `:236-238` | Pearson correlation also run on low-cardinality numeric *codes* | Correlating nominal codes is meaningless. **[low]** | Spearman for ordinal, Cramér's V for categoricals. |
+| `:206` | Outliers skipped when IQR = 0 | Zero-inflated columns (85% zeros) never get checked. **[med]** | Fall back to MAD / percentiles. |
+| `:239-242` | Pearson correlation also run on low-cardinality numeric *codes* | Correlating nominal codes is meaningless. **[low]** | Spearman for ordinal, Cramér's V for categoricals. |
 | — | No checks for: inconsistent casing/whitespace (`"Kepler"` vs `"kepler "`), leading/trailing spaces, mixed types in one column, impossible dates, target leakage (feature ≈ target), near-constant columns (99% one value) | Real-world data problems that go undetected. **[high]** | Add these detectors (see roadmap). |
 
 ## 3. Column type inference (`backend/app/engine/profiler.py`)
@@ -93,14 +96,14 @@ Severity tags used below:
 |---|---|---|---|
 | `:7-8` | `ID_TOKENS`, `STRONG_ID_TOKENS` (English) | `Planet Désignation` or `numéro_client` not recognised as IDs (falls back to "all unique text", which is then dropped anyway). **[low]** | Rely on value patterns (unique + monotonic / fixed-width codes) first; names second. |
 | `:9` | `BOOLEAN_STRINGS` (English yes/no/true/false) | `ja/nein`, `oui/non`, `sí/no` become categorical (still works, just labelled differently). **[low]** | Extendable list in config. |
-| `:10-11` | `DATE_NAME_TOKENS`, `YEAR_NAME_TOKENS` | Year detection *requires* a year-like column name (`:76`). A column `Built` with 1950–2020 is treated as plain numeric. **[med]** | Detect year ranges from values alone (all ints in 1800–2100, low cardinality). |
-| `:80` | Year range 1800–2100 | Historical/astronomical data excluded. **[low]** | Configurable. |
-| `:85` | Numeric with ≤ 5 unique and < 5% unique ⇒ categorical | A 1–5 rating scale becomes categorical (one-hot) instead of ordinal. **[med]** | Let the user override any column's type in the UI (the single most useful control you can add). |
-| `:98-103` | Date detection: ≥ 80% regex hits, or name hint + 50%, then 75% parse success | Reasonable, but invisible and unchangeable. **[low]** | Per-column override. |
-| `:109-112` | Unit pattern `^\$?\d+(\.\d+)?\s*[a-zA-Z%]+$` at ≥ 70% | **Misses `$12,345`, `1.234,56 €`, `12 345 km`, `€20`, negative values.** Such columns are typed as text and then dropped as high-cardinality. **[high]** | Add a currency/number parser (thousand separators, locale decimal comma, prefix/suffix symbols) and a `currency_numeric` type. The same pattern exists in `transforms.py:13`. |
-| `:116` | Multi-label requires a delimiter in ≥ 40% of values **and** an English name token (`cast`, `genre`, `tag`, …) | A `skills` column works, `competences` doesn't. **[med]** | Drop the name requirement; use value structure (consistent delimiter, repeated tokens). |
-| `:124-127` | Person-name detection by English name tokens and > 15 unique | Cosmetic; outcome is similar to "text". **[low]** | — |
-| `:130` | Categorical if ≤ 25 unique or < 5% unique | Fixed. **[low]** | Profile setting. |
+| `:10-11` | `DATE_NAME_TOKENS`, `YEAR_NAME_TOKENS` | Year detection *requires* a year-like column name (`:78`). A column `Built` with 1950–2020 is treated as plain numeric. **[med]** | Detect year ranges from values alone (all ints in 1800–2100, low cardinality). |
+| `:82` | Year range 1800–2100 | Historical/astronomical data excluded. **[low]** | Configurable. |
+| `:87` | Numeric with ≤ 5 unique and < 5% unique ⇒ categorical | A 1–5 rating scale becomes categorical (one-hot) instead of ordinal. **[med]** | Let the user override any column's type in the UI (the single most useful control you can add). |
+| `:99-111` | Date detection: ≥ 80% regex hits, or name hint + 50%, then 75% parse success (version strings excluded) | Reasonable, but invisible and unchangeable; month-first only. **[low]** | Per-column override. |
+| `:114-117` | Unit pattern `^\$?\d+(\.\d+)?\s*[a-zA-Z%]+$` at ≥ 70% | **Misses `$12,345`, `1.234,56 €`, `12 345 km`, `€20`, negative values.** Such columns are typed as text and then dropped as high-cardinality. **[high]** | Add a currency/number parser (thousand separators, locale decimal comma, prefix/suffix symbols) and a `currency_numeric` type. The same pattern exists in `transforms.py:13`. |
+| `:121` | Multi-label requires a delimiter in ≥ 40% of values **and** an English name token (`cast`, `genre`, `tag`, …) | A `skills` column works, `competences` doesn't. **[med]** | Drop the name requirement; use value structure (consistent delimiter, repeated tokens). |
+| `:129-132` | Person-name detection by English name tokens and > 15 unique | Cosmetic; outcome is similar to "text". **[low]** | — |
+| `:135` | Categorical if ≤ 25 unique or < 5% unique | Fixed. **[low]** | Profile setting. |
 
 ## 4. Remediation rule matrix (`backend/app/engine/rules.py`)
 
@@ -138,7 +141,7 @@ Also: `select_remediation_methods` accepts `problem_type` (`:24`) but never uses
 | `executor.py:203-204` | Outlier bounds fall back to 1st/99th percentile | Second hidden rule. **[low]** | Document / configurable. |
 | `executor.py:237` | `keep_top` default 10 (duplicate of detector constant) | Two sources of truth. **[low]** | Single constant. |
 | `transforms.py:13` | Same unit regex as profiler | Same currency gaps as §3. **[high]** | Shared parser. |
-| `transforms.py:57-65` | Dates → year, month, day only | Hour, weekday, quarter, weekend flag, cyclical encoding and elapsed time are lost (for taxi pickups, hour is the main signal). No `utc=True`, so mixed time-zone offsets can fail. **[med]** | Configurable date parts + `utc` / `dayfirst`. |
+| `transforms.py:87-95` | Dates → year, month, day only | Hour, weekday, quarter, weekend flag, cyclical encoding and elapsed time are lost (for taxi pickups, hour is the main signal). **[med]** | Configurable date parts + `dayfirst`. |
 | `transforms.py:14` | Tag split on `,` `;` `\|` only | `"Action/Adventure"` isn't split; `"Smith, John"` is. Tokens are case-sensitive. **[low]** | Configurable delimiter, case-folding. |
 | `executor.py:71` | Script reads input with plain `pd.read_csv` | The user's original semicolon / Windows-1252 / Excel file won't load in the exported script, because ingest normalisation isn't reproduced. **[med]** | Embed the detected delimiter / encoding in the script. |
 | — | Cleaning statistics (medians, bounds, rare lists) are fitted on all rows, then the benchmark cross-validates on the cleaned file | Mild leakage between folds for imputation and capping. **[med]** | Export a fitted scikit-learn `Pipeline`/`ColumnTransformer` and fit it inside each fold. |

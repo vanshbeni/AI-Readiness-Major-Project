@@ -7,7 +7,7 @@ from app.api.deps import get_owned_dataset, invalidate_execution
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.storage import dataset_lock
-from app.engine.explainer import explain_recommendations_with_gemini
+from app.engine.explainer import explain_recommendations
 from app.models.dataset import Dataset, Recommendation
 from app.schemas.dataset import RecommendationItem, RecommendationApprovalRequest
 
@@ -57,9 +57,9 @@ def regenerate_explanations(
     db_dataset: Dataset = Depends(get_owned_dataset),
     db: Session = Depends(get_db),
 ):
-    """Re-requests AI explanations (e.g. after Gemini was overloaded). Does not change approvals or results."""
-    if not settings.GEMINI_API_KEY.strip():
-        raise HTTPException(status_code=400, detail="GEMINI_API_KEY is not configured on the backend.")
+    """Re-requests AI explanations (e.g. after the model was overloaded). Does not change approvals or results."""
+    if not settings.OPENROUTER_API_KEY.strip():
+        raise HTTPException(status_code=400, detail="No LLM is configured on the backend (set OPENROUTER_API_KEY).")
 
     with dataset_lock(db_dataset.id):
         recs = db.query(Recommendation).filter(Recommendation.dataset_id == db_dataset.id).all()
@@ -75,11 +75,11 @@ def regenerate_explanations(
             }
             for r in recs
         ]
-        explained = explain_recommendations_with_gemini(rec_dicts)
+        explained = explain_recommendations(rec_dicts)
         if not any(e.get("explanation_source") == "ai" for e in explained):
             raise HTTPException(
                 status_code=503,
-                detail="Gemini is currently unavailable (high demand or timeout). Statistical explanations were kept; try again in a minute.",
+                detail="The AI model is currently unavailable (rate limit, high demand or timeout). Statistical explanations were kept; try again in a minute.",
             )
         for rec, e in zip(recs, explained):
             if e.get("explanation_source") == "ai":

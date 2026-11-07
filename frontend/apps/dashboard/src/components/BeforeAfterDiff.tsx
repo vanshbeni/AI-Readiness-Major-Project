@@ -1,5 +1,5 @@
 import React from 'react';
-import { ExecutionResult } from '../services/api';
+import { ExecutionResult, QualityFinding } from '../services/api';
 import { CountUp, Panel, Reveal } from './ui';
 
 interface BeforeAfterDiffProps {
@@ -10,6 +10,10 @@ const decimalsOf = (v: number) => (Number.isInteger(v) ? 0 : 1);
 
 export const BeforeAfterDiff: React.FC<BeforeAfterDiffProps> = ({ result }) => {
   const delta = result.health_score_delta;
+  const audit = result.quality_audit ?? [];
+  const fixed = audit.filter((f) => f.status === 'fixed');
+  const open = audit.filter((f) => f.status === 'open');
+  const advice = audit.filter((f) => f.status === 'advice');
   const stamp = delta > 0
     ? { cls: 'good', word: 'improved', color: 'var(--good)' }
     : delta < 0
@@ -113,6 +117,36 @@ export const BeforeAfterDiff: React.FC<BeforeAfterDiffProps> = ({ result }) => {
           </Panel>
         </Reveal>
       </div>
+
+      {audit.length > 0 && (
+        <Reveal delay={150}>
+          <Panel>
+            <div className="panel-head">
+              <div className="left">
+                <span className="dots"><i /><i /><i /></span>
+                <span>output.audit</span>
+              </div>
+              <span>
+                {fixed.length} repaired · {open.length} open · {advice.length} notes
+              </span>
+            </div>
+            <ul className="steps-list" style={{ listStyle: 'none' }}>
+              {[...open, ...fixed, ...advice].map((f, i) => (
+                <li key={i} style={{ display: 'flex', gap: '0.6rem', alignItems: 'baseline' }}>
+                  <span className="chip" style={{ color: STATUS_COLOR[f.status], flexShrink: 0 }}>{f.status}</span>
+                  <span>{f.detail}</span>
+                </li>
+              ))}
+            </ul>
+          </Panel>
+        </Reveal>
+      )}
     </div>
   );
+};
+
+const STATUS_COLOR: Record<QualityFinding['status'], string> = {
+  open: 'var(--bad)',
+  fixed: 'var(--good)',
+  advice: 'var(--muted)',
 };

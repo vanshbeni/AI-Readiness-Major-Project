@@ -32,7 +32,7 @@ def _numeric(series: pd.Series) -> pd.Series:
 def _datetime(series: pd.Series) -> pd.Series:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        return pd.to_datetime(series, errors="coerce", format="mixed")
+        return pd.to_datetime(series, errors="coerce", format="mixed", utc=True)
 
 
 def _round(values: np.ndarray, digits: int = 5) -> List[Optional[float]]:

@@ -1,17 +1,19 @@
 import React, { useEffect, useState } from 'react';
-import { BarChart3, FileSpreadsheet, RotateCcw } from 'lucide-react';
-import { api } from '../services/api';
+import { BarChart3, FileSpreadsheet, RotateCcw, Sparkles } from 'lucide-react';
+import { api, AgentStatus } from '../services/api';
 
 interface HeaderProps {
   datasetName?: string;
   onReset?: () => void;
   exploreHref?: string;
+  summaryHref?: string;
+  agentStatus?: AgentStatus | null;
 }
 
 const HEALTH_POLL_MS = 15000;
 const LANDING_URL = process.env.NEXT_PUBLIC_LANDING_URL || 'http://localhost:3001';
 
-export const Header: React.FC<HeaderProps> = ({ datasetName, onReset, exploreHref }) => {
+export const Header: React.FC<HeaderProps> = ({ datasetName, onReset, exploreHref, summaryHref, agentStatus }) => {
   const [engineOnline, setEngineOnline] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -54,6 +56,23 @@ export const Header: React.FC<HeaderProps> = ({ datasetName, onReset, exploreHre
             <i />
             <span>{statusText}</span>
           </span>
+
+          {agentStatus && (
+            <span
+              className={`status agents ${agentStatus.configured ? 'on' : ''}`}
+              title={agentStatus.configured ? `Agents use ${agentStatus.model} via OpenRouter` : 'No OPENROUTER_API_KEY: agents use deterministic rules'}
+            >
+              <i />
+              <span>{agentStatus.configured ? 'agents live' : 'agents: rules only'}</span>
+            </span>
+          )}
+
+          {summaryHref && (
+            <a href={summaryHref} className="btn btn-light btn-sm" title="Every chart and insight on one page">
+              <Sparkles size={13} />
+              Summary
+            </a>
+          )}
 
           {exploreHref && (
             <a href={exploreHref} className="btn btn-dark btn-sm" title="Visualize the dataset">

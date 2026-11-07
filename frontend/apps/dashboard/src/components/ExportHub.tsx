@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { api } from '../services/api';
+import { api, isUnsupervised } from '../services/api';
 import { ArrowDown, Loader2 } from 'lucide-react';
 import { Banner, Eyebrow, Panel, Reveal } from './ui';
 
@@ -7,9 +7,11 @@ interface ExportHubProps {
   datasetId: string;
   hasExecution: boolean;
   hasBenchmarks: boolean;
+  hasAssignments?: boolean;
+  problemType?: string;
 }
 
-type ExportKind = 'cleaned-csv' | 'pipeline-script' | 'pdf-report' | 'manifest-json';
+type ExportKind = 'cleaned-csv' | 'pipeline-script' | 'data-dictionary' | 'assignments' | 'pdf-report' | 'manifest-json';
 
 const EXPORTS: {
   kind: ExportKind;
@@ -22,12 +24,25 @@ const EXPORTS: {
 }[] = [
   { kind: 'cleaned-csv', ext: '.csv', title: 'Cleaned dataset', description: 'Preprocessed, ML-ready CSV.', fallbackName: 'cleaned_dataset.csv', color: 'var(--accent)', requiresExecution: true },
   { kind: 'pipeline-script', ext: '.py', title: 'Pipeline script', description: 'Standalone Python that reproduces the cleaned CSV.', fallbackName: 'pipeline.py', color: 'var(--good)', requiresExecution: true },
+  { kind: 'data-dictionary', ext: '.csv', title: 'Data dictionary', description: 'Every exported column: source, meaning, encoding baseline and transformations.', fallbackName: 'data_dictionary.csv', color: 'var(--warn, var(--accent))', requiresExecution: true },
   { kind: 'pdf-report', ext: '.pdf', title: 'Quality audit', description: 'Executive PDF diagnostic report.', fallbackName: 'data_readiness_report.pdf', color: 'var(--bad)', requiresExecution: false },
   { kind: 'manifest-json', ext: '.json', title: 'JSON manifest', description: 'Machine-readable audit manifest.', fallbackName: 'manifest.json', color: 'var(--ink)', requiresExecution: false },
 ];
 
-export const ExportHub: React.FC<ExportHubProps> = ({ datasetId, hasExecution, hasBenchmarks }) => {
+export const ExportHub: React.FC<ExportHubProps> = ({ datasetId, hasExecution, hasBenchmarks, hasAssignments, problemType }) => {
   const [busy, setBusy] = useState<ExportKind | null>(null);
+  const exportsList = isUnsupervised(problemType)
+    ? [
+      ...EXPORTS.slice(0, 1),
+      {
+        kind: 'assignments' as ExportKind, ext: '.csv',
+        title: problemType === 'clustering' ? 'Clustered dataset' : 'Flagged dataset',
+        description: problemType === 'clustering' ? 'Cleaned rows with the cluster each one belongs to.' : 'Cleaned rows with anomaly flag, score and detector votes.',
+        fallbackName: 'labelled_dataset.csv', color: 'var(--accent)', requiresExecution: true,
+      },
+      ...EXPORTS.slice(1),
+    ]
+    : EXPORTS;
   const [error, setError] = useState<string | null>(null);
 
   const handleDownload = async (kind: ExportKind, fallbackName: string) => {
@@ -58,8 +73,8 @@ export const ExportHub: React.FC<ExportHubProps> = ({ datasetId, hasExecution, h
       {error && <Banner tone="error" onClose={() => setError(null)}>{error}</Banner>}
 
       <div className="export-grid">
-        {EXPORTS.map((item, i) => {
-          const locked = item.requiresExecution && !hasExecution;
+        {exportsList.map((item, i) => {
+          const locked = (item.requiresExecution && !hasExecution) || (item.kind === 'assignments' && !hasAssignments);
           const disabled = locked || busy !== null;
           return (
             <Reveal key={item.kind} delay={i * 80}>
@@ -81,7 +96,8 @@ export const ExportHub: React.FC<ExportHubProps> = ({ datasetId, hasExecution, h
                 </span>
                 <span className="go">
                   {busy === item.kind ? <Loader2 size={12} className="animate-spin" /> : <ArrowDown size={12} />}
-                  {locked ? 'run pipeline first' : busy === item.kind ? 'preparing…' : `download ${item.fallbackName}`}
+                  {locked ? (item.kind === 'assignments' && hasExecution ? 'run the benchmark first' : 'run pipeline first')
+                    : busy === item.kind ? 'preparing…' : `download ${item.fallbackName}`}
                 </span>
               </Panel>
             </Reveal>

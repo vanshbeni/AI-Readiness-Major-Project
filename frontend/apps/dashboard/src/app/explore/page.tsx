@@ -7,6 +7,7 @@ import { Banner, Eyebrow, Note, Panel, Reveal, Scramble, SkyBand, Underlined } f
 import { api, ExploreColumn, ExplorePayload } from '../../services/api';
 import { BoxCompare, CategoryBars, Heatmap, Histogram, Legend, MiniBars, MiniHist, MissingMatrix, ParallelCoords, type Group } from '../../components/viz/charts';
 import { Scatter2D, Scatter3D } from '../../components/viz/scatter';
+import { AskPanel } from '../../components/agents/AskPanel';
 import {
   CLUSTER_KEY,
   PALETTE,
@@ -21,7 +22,7 @@ import {
   sturges,
 } from '../../components/viz/lib';
 
-type Mode = 'overview' | 'distribution' | 'scatter' | 'space' | 'projection' | 'correlation' | 'missing' | 'compare' | 'parallel';
+type Mode = 'overview' | 'distribution' | 'scatter' | 'space' | 'projection' | 'correlation' | 'missing' | 'compare' | 'parallel' | 'ask';
 
 const MODES: { key: Mode; label: string; hint: string }[] = [
   { key: 'overview', label: 'overview', hint: 'every column at a glance' },
@@ -33,6 +34,7 @@ const MODES: { key: Mode; label: string; hint: string }[] = [
   { key: 'missing', label: 'missingness', hint: 'where the holes are' },
   { key: 'compare', label: 'compare groups', hint: 'numeric split by category' },
   { key: 'parallel', label: 'parallel axes', hint: 'many dimensions, one picture' },
+  { key: 'ask', label: 'ask ai', hint: 'questions in plain language, answered with verified queries' },
 ];
 
 const DATASET_PARAM = 'dataset';
@@ -162,7 +164,8 @@ export default function ExplorePage() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.metaKey || e.ctrlKey) return;
-      const n = Number(e.key);
+      if (e.target instanceof HTMLTextAreaElement) return;
+      const n = e.key === '0' ? 10 : Number(e.key);
       if (n >= 1 && n <= MODES.length) setMode(MODES[n - 1].key);
     };
     window.addEventListener('keydown', onKey);
@@ -601,6 +604,9 @@ export default function ExplorePage() {
           </div>
         );
       }
+
+      case 'ask':
+        return datasetId ? <AskPanel datasetId={datasetId} columns={payload.columns} target={payload.target} source={source} /> : null;
     }
   };
 
@@ -652,12 +658,12 @@ export default function ExplorePage() {
           <nav className="lab-tabs" aria-label="Visualizations">
             {MODES.map((m, i) => (
               <button key={m.key} type="button" className={mode === m.key ? 'on' : ''} onClick={() => setMode(m.key)} title={`${m.hint} (key ${i + 1})`}>
-                <span className="n">{i + 1}</span>{m.label}
+                <span className="n">{(i + 1) % 10}</span>{m.label}
               </button>
             ))}
             <span className="lab-tabs-fill" style={{ left: `${(activeIdx / MODES.length) * 100}%`, width: `${100 / MODES.length}%` }} />
           </nav>
-          <p className="lab-mode-hint mono"><span className="dim">$</span> {MODES[activeIdx].hint}<span className="dim"> · press 1–9 to switch</span></p>
+          <p className="lab-mode-hint mono"><span className="dim">$</span> {MODES[activeIdx].hint}<span className="dim"> · press 1–9 or 0 to switch</span></p>
 
           {loading ? (
             <Panel className="panel-pad lab-loading">

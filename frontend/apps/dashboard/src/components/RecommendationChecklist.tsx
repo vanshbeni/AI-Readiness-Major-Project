@@ -130,7 +130,7 @@ export const RecommendationChecklist: React.FC<RecommendationChecklistProps> = (
           </span>
           <button className="btn btn-light btn-sm" onClick={handleRegenerate} disabled={regenerating || executing}>
             {regenerating ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
-            {regenerating ? 'asking gemini…' : 'retry ai explanations'}
+            {regenerating ? 'asking the model…' : 'retry ai explanations'}
           </button>
         </div>
       )}
@@ -166,6 +166,12 @@ export const RecommendationChecklist: React.FC<RecommendationChecklistProps> = (
                     <span className={`src ${isAi ? 'ai' : 'stat'}`}>{isAi ? '[ai]' : '[stats]'}</span>
                     <span>{rec.explanation_text}</span>
                   </div>
+                  {rec.agent_note && (
+                    <div className="rec-why agent">
+                      <span className="src ai">[agent]</span>
+                      <span>{rec.agent_note}</span>
+                    </div>
+                  )}
                 </div>
                 <span className="rec-toggle">
                   <span style={{ color: isApproved ? 'var(--good)' : 'var(--dim)', minWidth: 58, textAlign: 'right' }}>

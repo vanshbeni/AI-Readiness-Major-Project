@@ -1,8 +1,24 @@
 import re
 import warnings
+from contextlib import contextmanager
+from contextvars import ContextVar
 import numpy as np
 import pandas as pd
 from typing import Dict, Any, List, Tuple
+
+# Column types approved by the user (usually proposed by the Understand agent). Set per request with
+# `type_overrides(...)`; every caller of infer_column_type (profiling, detection, dedupe, visual lab) honours it.
+ALLOWED_TYPE_OVERRIDES = {"numeric", "categorical", "boolean", "datetime", "id", "text", "year_range"}
+_TYPE_OVERRIDES: ContextVar[Dict[str, str]] = ContextVar("type_overrides", default={})
+
+
+@contextmanager
+def type_overrides(mapping: Dict[str, str]):
+    token = _TYPE_OVERRIDES.set({k: v for k, v in (mapping or {}).items() if v in ALLOWED_TYPE_OVERRIDES})
+    try:
+        yield
+    finally:
+        _TYPE_OVERRIDES.reset(token)
 
 ID_TOKENS = {"id", "uuid", "guid", "pk", "index", "idx", "key", "code", "number", "no"}
 STRONG_ID_TOKENS = {"id", "uuid", "guid", "pk"}
@@ -14,6 +30,8 @@ DATE_VALUE_PATTERN = re.compile(
     r"|\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b",
     re.IGNORECASE,
 )
+# Software versions like "1.2.3" or "v2.10" match the date regex but have no 4-digit year group.
+VERSION_PATTERN = re.compile(r"^v?\d{1,3}(\.\d{1,3}){1,3}$", re.IGNORECASE)
 
 
 def name_tokens(col_name: str) -> List[str]:
@@ -45,6 +63,10 @@ def infer_column_type(series: pd.Series, col_name: str) -> str:
     - categorical (low-cardinality nominal)
     - text (free-form prose)
     """
+    forced = _TYPE_OVERRIDES.get().get(str(col_name))
+    if forced:
+        return forced
+
     clean_series = series.dropna()
     if clean_series.empty:
         return "text"
@@ -95,11 +117,14 @@ def infer_column_type(series: pd.Series, col_name: str) -> str:
 
     # 6. Check if Chronological Date String (e.g. "January 1, 2020", "2019-11-01", "01/05/2021")
     date_like_ratio = sum(bool(DATE_VALUE_PATTERN.search(s)) for s in sample_strs) / max(len(sample_strs), 1)
-    if date_like_ratio >= 0.8 or (any(t in DATE_NAME_TOKENS for t in tokens) and date_like_ratio >= 0.5):
+    version_like_ratio = sum(bool(VERSION_PATTERN.match(s.strip())) for s in sample_strs) / max(len(sample_strs), 1)
+    if version_like_ratio < 0.8 and (
+        date_like_ratio >= 0.8 or (any(t in DATE_NAME_TOKENS for t in tokens) and date_like_ratio >= 0.5)
+    ):
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                parsed = pd.to_datetime(sample_strs, format="mixed", errors="coerce")
+                parsed = pd.to_datetime(sample_strs, format="mixed", errors="coerce", utc=True)
                 if parsed.notna().mean() >= 0.75:
                     return "datetime"
         except Exception:

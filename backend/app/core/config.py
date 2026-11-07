@@ -19,15 +19,21 @@ class Settings(BaseSettings):
     # Database (set DATABASE_URL in backend/.env; defaults to a local SQLite file)
     DATABASE_URL: str = f"sqlite:///{(BASE_DIR / 'datareadiness.db').as_posix()}"
 
-    # Gemini AI
-    GEMINI_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-3.8-flash"
-    # Tried in order after GEMINI_MODEL when it is overloaded, rate-limited or unavailable
-    GEMINI_FALLBACK_MODELS: List[str] = ["gemini-3.7-flash", "gemini-3.8-flash"]
-    GEMINI_TIMEOUT_SEC: float = 30.0
-    GEMINI_MAX_RETRIES: int = 2
-    # Upper bound on total time spent waiting for Gemini before using statistical explanations
-    GEMINI_TOTAL_BUDGET_SEC: float = 45.0
+    # Agents / LLM access via OpenRouter (OpenAI-compatible API). Without a key every agent
+    # falls back to its deterministic rules, so the app keeps working.
+    OPENROUTER_API_KEY: str = ""
+    OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
+    # "openrouter/free" routes each request to an available free model.
+    OPENROUTER_MODEL: str = "openrouter/free"
+    OPENROUTER_FALLBACK_MODELS: List[str] = ["nvidia/nemotron-3.5-super-vl:free", "google/gemma-4-31b-it:free"]
+    LLM_TIMEOUT_SEC: float = 90.0
+    LLM_MAX_RETRIES: int = 2
+    # Analyst agent: max tool calls per question; every agent run: wall-clock budget
+    AGENT_MAX_STEPS: int = 8
+    AGENT_RUN_BUDGET_SEC: float = 300.0
+    # What agents may send to the LLM: "schema" (names/types only), "aggregates" (+ stats), "samples" (+ redacted values)
+    AI_PRIVACY_MODE: str = "samples"
+    APP_PUBLIC_URL: str = "http://localhost:3000"
 
     # Storage Paths
     UPLOAD_DIR: str = str(BASE_DIR / "uploads")

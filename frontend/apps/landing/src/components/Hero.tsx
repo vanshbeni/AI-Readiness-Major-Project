@@ -38,7 +38,7 @@ const STACK = [
   { name: 'PANDAS', role: 'profiling' },
   { name: 'SCIKIT-LEARN', role: 'pipelines' },
   { name: 'FASTAPI', role: 'engine api' },
-  { name: 'GEMINI', role: 'explanations' },
+  { name: 'OPENROUTER', role: 'ai agents' },
   { name: 'XGBOOST', role: 'benchmarks' },
   { name: 'NEXT.JS', role: 'dashboard' },
 ];

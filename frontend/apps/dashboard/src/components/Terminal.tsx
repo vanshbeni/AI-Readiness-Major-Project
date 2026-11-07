@@ -55,13 +55,35 @@ export function Terminal({ title, command, lines, stepMs = 1400, footer }: Termi
 const CLASSIFICATION_MODELS = ['random forest', 'xgboost', 'lightgbm', 'logistic regression', 'gradient boosting', 'decision tree', 'svc'];
 const REGRESSION_MODELS = ['random forest', 'xgboost', 'lightgbm', 'ridge regression', 'gradient boosting', 'decision tree', 'svr'];
 
+const CLUSTERING_MODELS = ['k-means', 'gaussian mixture', 'agglomerative (ward)', 'birch', 'dbscan', 'hdbscan'];
+const ANOMALY_MODELS = ['isolation forest', 'local outlier factor', 'one-class svm', 'robust z-score', 'elliptic envelope'];
+
 export function BenchmarkTerminal({ problemType }: { problemType?: string }) {
-  const models = problemType === 'regression' ? REGRESSION_MODELS : CLASSIFICATION_MODELS;
-  const lines = [
-    'loading cleaned dataset',
-    'building leak-free folds  (impute → scale → resample → fit)',
-    ...models.map((m) => `cross-validating ${m}`),
-    'ranking candidates by primary metric',
-  ];
+  let lines: string[];
+  if (problemType === 'clustering') {
+    lines = [
+      'loading cleaned dataset',
+      'encoding + scaling every usable feature',
+      ...CLUSTERING_MODELS.map((m) => `fitting ${m}  (choosing k by silhouette / BIC)`),
+      'shuffling columns to build a no-structure reference',
+      'profiling the winning clusters',
+    ];
+  } else if (problemType === 'anomaly_detection') {
+    lines = [
+      'loading cleaned dataset',
+      'estimating contamination from robust z-scores',
+      ...ANOMALY_MODELS.map((m) => `scoring rows with ${m}`),
+      'voting: rows most detectors agree on',
+      'explaining the top anomalies',
+    ];
+  } else {
+    const models = problemType === 'regression' ? REGRESSION_MODELS : CLASSIFICATION_MODELS;
+    lines = [
+      'loading cleaned dataset',
+      'building leak-free folds  (impute → scale → resample → fit)',
+      ...models.map((m) => `cross-validating ${m}`),
+      'ranking candidates by primary metric',
+    ];
+  }
   return <Terminal title="benchmark.log" command={`benchmark --cv auto --task ${problemType ?? 'auto'}`} lines={lines} stepMs={1800} />;
 }

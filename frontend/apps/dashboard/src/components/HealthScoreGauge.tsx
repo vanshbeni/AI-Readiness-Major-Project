@@ -5,11 +5,12 @@ import { CountUp, Note, Panel, useInView } from './ui';
 interface HealthScoreGaugeProps {
   score: HealthScore;
   stageName?: string;
+  problemType?: string;
 }
 
 const toneFor = (v: number) => (v >= 85 ? 'var(--good)' : v >= 65 ? 'var(--accent)' : v >= 50 ? 'var(--warn)' : 'var(--bad)');
 
-export const HealthScoreGauge: React.FC<HealthScoreGaugeProps> = ({ score, stageName = 'raw dataset' }) => {
+export const HealthScoreGauge: React.FC<HealthScoreGaugeProps> = ({ score, stageName = 'raw dataset', problemType }) => {
   const [ref, inView] = useInView<HTMLDivElement>(0.25);
   const comp = score.composite_score;
   const radius = 76;
@@ -17,14 +18,20 @@ export const HealthScoreGauge: React.FC<HealthScoreGaugeProps> = ({ score, stage
   const offset = inView ? circumference - (comp / 100) * circumference : circumference;
   const color = toneFor(comp);
 
-  const subScoreList = [
-    { label: 'missing values', weight: 25, val: score.sub_scores.missingness_score },
-    { label: 'duplication', weight: 15, val: score.sub_scores.duplicate_score },
-    { label: 'outliers', weight: 15, val: score.sub_scores.outlier_score },
-    { label: 'domain validity', weight: 15, val: score.sub_scores.validity_score },
-    { label: 'target balance', weight: 15, val: score.sub_scores.target_balance_score },
-    { label: 'feature quality', weight: 15, val: score.sub_scores.feature_quality_score },
+  // Mirrors backend scorer.task_weights: unsupervised tasks have no target, anomaly detection has no signal check.
+  const all = [
+    { key: 'signal', label: problemType === 'clustering' ? 'cluster structure' : 'predictive signal', weight: 20, val: score.sub_scores.signal_score ?? 100 },
+    { key: 'completeness', label: 'completeness', weight: 20, val: score.sub_scores.missingness_score },
+    { key: 'validity', label: 'validity & consistency', weight: 20, val: score.sub_scores.validity_score },
+    { key: 'usefulness', label: 'feature usefulness', weight: 15, val: score.sub_scores.feature_quality_score },
+    { key: 'target', label: 'target health', weight: 10, val: score.sub_scores.target_balance_score },
+    { key: 'uniqueness', label: 'uniqueness', weight: 10, val: score.sub_scores.duplicate_score },
+    { key: 'outliers', label: 'extreme values', weight: 5, val: score.sub_scores.outlier_score },
   ];
+  const dropped = problemType === 'clustering' ? ['target'] : problemType === 'anomaly_detection' ? ['target', 'signal'] : [];
+  const kept = all.filter((s) => !dropped.includes(s.key));
+  const total = kept.reduce((sum, s) => sum + s.weight, 0);
+  const subScoreList = kept.map((s) => ({ ...s, weight: Math.round((s.weight / total) * 100) }));
 
   const verdict = comp >= 85 ? 'ship it' : comp >= 65 ? 'needs a tune-up' : comp >= 50 ? 'rough shape' : 'yikes.';
 
@@ -35,7 +42,7 @@ export const HealthScoreGauge: React.FC<HealthScoreGaugeProps> = ({ score, stage
           <span className="dots"><i /><i /><i /></span>
           <span>health_score · {stageName}</span>
         </div>
-        <span>weighted across 6 checks</span>
+        <span>{subScoreList.length} checks · weighted geometric mean</span>
       </div>
       <div ref={ref} className={`score-grid ${inView ? 'in' : ''}`}>
         <div className="score-dial">

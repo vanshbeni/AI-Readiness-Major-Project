@@ -27,17 +27,28 @@ export interface DatasetSample {
   sample_data: Record<string, any>[];
 }
 
+export type ProblemType = 'classification' | 'regression' | 'clustering' | 'anomaly_detection';
+export const UNSUPERVISED: ProblemType[] = ['clustering', 'anomaly_detection'];
+export const isUnsupervised = (p?: string | null) => !!p && (UNSUPERVISED as string[]).includes(p);
+export const TASK_LABEL: Record<string, string> = {
+  classification: 'classification',
+  regression: 'regression',
+  clustering: 'clustering',
+  anomaly_detection: 'anomaly detection',
+};
+
 export interface Objective {
   id: string;
   dataset_id: string;
   problem_type: string;
-  target_column: string;
+  target_column: string; // empty for unsupervised tasks
 }
 
 export interface TargetSuggestion {
   suitable: boolean;
-  problem_type: 'classification' | 'regression' | null;
+  problem_type: ProblemType | null;
   reason: string;
+  warning?: string;
 }
 
 export interface SubScores {
@@ -47,6 +58,7 @@ export interface SubScores {
   validity_score: number;
   target_balance_score: number;
   feature_quality_score: number;
+  signal_score?: number;
 }
 
 export interface HealthScore {
@@ -102,6 +114,7 @@ export interface RecommendationItem {
   severity: string;
   is_destructive: boolean;
   is_approved: boolean;
+  agent_note?: string | null;
 }
 
 export interface FullDiagnostic {
@@ -145,6 +158,30 @@ export interface ExecutionResult {
   metric_deltas: MetricDelta[];
   cleaned_rows: number;
   cleaned_cols: number;
+  quality_audit?: QualityFinding[];
+  data_dictionary?: DataDictionaryRow[];
+}
+
+export interface QualityFinding {
+  check: string;
+  severity: 'critical' | 'high' | 'medium' | 'low' | 'info';
+  status: 'fixed' | 'open' | 'advice';
+  column?: string | null;
+  detail: string;
+}
+
+export interface DataDictionaryRow {
+  column: string;
+  dtype: string;
+  kind: string;
+  source_column: string;
+  origin: 'original' | 'derived';
+  meaning: string;
+  transformations: string[];
+  missing: number;
+  unique: number;
+  min?: number | null;
+  max?: number | null;
 }
 
 export interface ModelBenchmarkItem {
@@ -159,6 +196,49 @@ export interface ModelBenchmarkItem {
   is_recommended: boolean;
   description: string;
   suitability: string;
+  metric_std?: number | null;
+  is_baseline?: boolean;
+  extra?: Record<string, any> | null;
+}
+
+export interface ClusterProfile {
+  cluster: number;
+  size: number;
+  share: number;
+  noise: boolean;
+  traits: { feature: string; z: number; cluster: number; overall: number; unit: string }[];
+}
+
+export interface AnomalyRow {
+  row: number | string;
+  score: number;
+  votes: number;
+  of: number;
+  reasons: { feature: string; value: number; robust_z: number }[];
+}
+
+export interface BenchmarkEvaluation {
+  metric: string;
+  metric_label: string;
+  higher_is_better: boolean;
+  cv: 'stratified' | 'kfold' | 'time' | 'none';
+  n_splits: number;
+  time_column?: string | null;
+  rows_used: number;
+  rows_available: number;
+  skipped_models: string[];
+  source: string;
+  reason?: string | null;
+  verdict?: 'useful' | 'weak' | 'no_signal' | null;
+  lift_over_baseline?: number | null;
+  task?: string;
+  clusters?: ClusterProfile[];
+  k?: number;
+  anomalies?: AnomalyRow[];
+  contamination?: number;
+  consensus_count?: number;
+  detectors?: string[];
+  has_assignments?: boolean;
 }
 
 export interface BenchmarkLeaderboard {
@@ -168,6 +248,164 @@ export interface BenchmarkLeaderboard {
   cv_folds: number;
   models: ModelBenchmarkItem[];
   best_model_summary: string;
+  evaluation?: BenchmarkEvaluation | null;
+}
+
+// ─── Summary page ────────────────────────────────────────────────────────────
+
+export interface SummaryHist { discrete: boolean; edges?: number[]; values?: number[]; counts: number[] }
+export interface SummaryBox { q1: number; median: number; q3: number; lo: number; hi: number; min: number; max: number; outliers: number; extreme: number }
+export interface SummaryColumn {
+  name: string;
+  kind: 'numeric' | 'categorical' | 'datetime' | 'text' | 'id';
+  inferred_type: string;
+  is_target: boolean;
+  missing_pct: number;
+  unique: number;
+  stats?: { min: number; max: number; mean: number; median: number; std: number; q1: number; q3: number; skew: number } | null;
+  range?: [string, string] | null;
+  hist?: SummaryHist | null;
+  box?: SummaryBox | null;
+  timeline?: { granularity: string; points: { t: string; count: number }[]; start: string; end: string; span_days: number } | null;
+  top?: { value: string; count: number }[];
+  other_count?: number;
+  top_share?: number;
+}
+export interface SummaryInsight { kind: string; tone: 'good' | 'warn' | 'bad' | 'info'; title: string; text: string; column?: string }
+export interface SummaryDriver {
+  feature: string;
+  association: number;
+  breakdown?: { measure: string; overall: number; focus?: string; groups: { group: string; value: number; n: number }[] } | null;
+}
+export interface SummaryPayload {
+  dataset_id: string;
+  filename: string;
+  source: 'raw' | 'cleaned';
+  has_cleaned: boolean;
+  rows: number;
+  cols: number;
+  kinds: Record<string, number>;
+  target: string | null;
+  problem_type: string | null;
+  columns: SummaryColumn[];
+  missing: { cells_pct: number; complete_rows_pct: number; by_column: { column: string; pct: number; count: number }[] };
+  duplicates: number;
+  correlation: { pairs: { a: string; b: string; r: number }[]; heatmap: { columns: string[]; matrix: (number | null)[][] } | null };
+  target_info: {
+    name: string; problem_type: string; missing: number;
+    classes?: { value: string; count: number }[]; hist?: SummaryHist | null; box?: SummaryBox | null; drivers: SummaryDriver[];
+  } | null;
+  projection: {
+    coords: number[][]; explained: number[]; loadings: { feature: string; weight: number }[][]; features: string[];
+    color: (string | null)[] | null; color_label: string | null;
+  } | null;
+  insights: SummaryInsight[];
+  health: HealthScore | null;
+  issues: { severity: string; title: string; type: string }[];
+  execution: { before_health_score: number; after_health_score: number; health_score_delta: number; cleaned_rows: number;
+    cleaned_cols: number; transformations_applied: string[]; quality_audit?: QualityFinding[] } | null;
+  leaderboard: BenchmarkLeaderboard | null;
+  report: { markdown: string; source: string; generated_at: string } | null;
+}
+
+// ─── Agents ──────────────────────────────────────────────────────────────────
+
+export type AgentKind = 'understand' | 'clean' | 'evaluate' | 'report' | 'ask' | 'autopilot';
+export type AgentRunStatus = 'queued' | 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled';
+
+export interface AgentStep {
+  i: number;
+  t: string;
+  actor: string;
+  kind: 'plan' | 'tool' | 'llm' | 'critic' | 'gate' | 'result' | 'warn' | 'error';
+  text: string;
+  data?: any;
+}
+
+export interface AgentGateItem {
+  id: string;
+  label: string;
+  reason?: string;
+  confidence?: number;
+  source?: string;
+  destructive?: boolean;
+  default?: boolean;
+  column?: string | null;
+  action?: string;
+  from?: string;
+  to?: string;
+}
+
+export interface AgentGateQuestion {
+  id: string;
+  column: string;
+  question: string;
+  options: { label: string; action?: string | null }[];
+}
+
+export interface AgentGate {
+  type: 'understand' | 'clean' | 'evaluate';
+  title: string;
+  stage?: string;
+  items: AgentGateItem[];
+  questions?: AgentGateQuestion[];
+  notes?: Record<string, string>;
+  plan?: Record<string, any>;
+}
+
+export interface AgentChart {
+  id: string;
+  type: 'bar' | 'line' | 'scatter';
+  title: string;
+  table: string;
+  x: string;
+  y: string[];
+  columns: string[];
+  rows: (string | number | null)[][];
+}
+
+export interface AgentTable {
+  id: string;
+  title: string;
+  columns: string[];
+  rows: (string | number | null)[][];
+}
+
+export interface AgentReport {
+  markdown: string;
+  source: 'agent' | 'rules';
+  generated_at: string;
+  facts?: { id: string; label: string; value: any }[];
+}
+
+export interface AgentRun {
+  id: string;
+  dataset_id: string;
+  kind: AgentKind;
+  status: AgentRunStatus;
+  input?: Record<string, any> | null;
+  steps: AgentStep[];
+  step_count: number;
+  gate: AgentGate | null;
+  result: any;
+  usage?: { calls: number; prompt_tokens: number; completion_tokens: number; models: string[] } | null;
+  error?: string | null;
+  created_at?: string;
+}
+
+export interface AgentStatus {
+  configured: boolean;
+  provider: string;
+  model: string;
+  fallbacks: string[];
+  privacy_mode: string;
+  agents: AgentKind[];
+}
+
+export interface AgentPolicy {
+  column_overrides: Record<string, Record<string, any>>;
+  eval_plan: Record<string, any> | null;
+  report: AgentReport | null;
 }
 
 export type ExploreKind = 'numeric' | 'categorical' | 'datetime' | 'text' | 'id';
@@ -362,6 +600,10 @@ export const api = {
     return requestJson(`/datasets/${datasetId}/execute`, { method: 'POST' }, 'Pipeline execution failed');
   },
 
+  summary(datasetId: string, source: 'raw' | 'cleaned'): Promise<SummaryPayload> {
+    return requestJson(`/datasets/${datasetId}/summary?source=${source}`, { cache: 'no-store' }, 'Failed to build the summary');
+  },
+
   explore(datasetId: string, source: 'raw' | 'cleaned', maxRows = 2000): Promise<ExplorePayload> {
     return requestJson(
       `/datasets/${datasetId}/explore?source=${source}&max_rows=${maxRows}`,
@@ -370,13 +612,58 @@ export const api = {
     );
   },
 
+  agentStatus(): Promise<AgentStatus> {
+    return requestJson('/agents/status', { cache: 'no-store' }, 'Failed to read agent status');
+  },
+
+  startAgent(
+    datasetId: string,
+    kind: AgentKind,
+    body: { question?: string; history?: { q: string; a: string }[]; source?: 'raw' | 'cleaned' } = {},
+  ): Promise<AgentRun> {
+    return requestJson(
+      `/datasets/${datasetId}/agents/${kind}`,
+      { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) },
+      'Failed to start the agent',
+    );
+  },
+
+  getAgentRun(runId: string, since = 0): Promise<AgentRun> {
+    return requestJson(`/agent-runs/${runId}?since=${since}`, { cache: 'no-store' }, 'Failed to read the agent run');
+  },
+
+  resumeAgentRun(runId: string, approvals: Record<string, boolean>, answers: Record<string, number>): Promise<AgentRun> {
+    return requestJson(
+      `/agent-runs/${runId}/resume`,
+      { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ approvals, answers }) },
+      'Failed to send your decision to the agent',
+    );
+  },
+
+  cancelAgentRun(runId: string): Promise<AgentRun> {
+    return requestJson(`/agent-runs/${runId}/cancel`, { method: 'POST' }, 'Failed to cancel the agent run');
+  },
+
+  listAgentRuns(datasetId: string, kind?: AgentKind, limit = 10): Promise<AgentRun[]> {
+    const q = new URLSearchParams({ limit: String(limit), ...(kind ? { kind } : {}) });
+    return requestJson(`/datasets/${datasetId}/agents/runs?${q}`, { cache: 'no-store' }, 'Failed to list agent runs');
+  },
+
+  getAgentPolicy(datasetId: string): Promise<AgentPolicy> {
+    return requestJson(`/datasets/${datasetId}/agents/policy`, { cache: 'no-store' }, 'Failed to read agent decisions');
+  },
+
+  resetAgentPolicy(datasetId: string, part: 'all' | 'columns' | 'eval_plan' | 'report' = 'all'): Promise<AgentPolicy> {
+    return requestJson(`/datasets/${datasetId}/agents/policy?part=${part}`, { method: 'DELETE' }, 'Failed to reset agent decisions');
+  },
+
   runBenchmarks(datasetId: string): Promise<BenchmarkLeaderboard> {
     return requestJson(`/datasets/${datasetId}/benchmark`, { method: 'POST' }, 'Model benchmarking failed');
   },
 
   async downloadExport(
     datasetId: string,
-    kind: 'cleaned-csv' | 'pipeline-script' | 'pdf-report' | 'manifest-json',
+    kind: 'cleaned-csv' | 'pipeline-script' | 'data-dictionary' | 'assignments' | 'pdf-report' | 'manifest-json',
     fallbackName: string,
   ): Promise<void> {
     const res = await request(`/datasets/${datasetId}/export/${kind}`, {}, 'Download failed');

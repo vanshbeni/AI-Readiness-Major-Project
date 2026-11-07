@@ -1,3 +1,5 @@
+import csv
+import io
 import json
 import os
 
@@ -12,6 +14,7 @@ from app.core.storage import json_safe
 from app.engine.reporter import generate_pdf_report
 from app.engine.scorer import grade_for_score
 from app.models.dataset import Dataset, HealthScore, ModelBenchmark, ProcessingJob, ProfileReport, Recommendation
+from app.services.pipeline import assignments_file, data_dictionary_path
 
 router = APIRouter()
 
@@ -42,6 +45,42 @@ def download_pipeline_script(db_dataset: Dataset = Depends(get_owned_dataset), d
     if not job or not job.script_file_path or not os.path.exists(job.script_file_path):
         raise HTTPException(status_code=404, detail="Pipeline script not found. Execute the pipeline first.")
     return FileResponse(path=job.script_file_path, filename=f"pipeline_{_base_name(db_dataset)}.py", media_type="text/x-python")
+
+
+def _load_dictionary(dataset_id: str) -> dict:
+    path = data_dictionary_path(dataset_id)
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+@router.get("/{dataset_id}/export/data-dictionary")
+def download_data_dictionary(db_dataset: Dataset = Depends(get_owned_dataset)):
+    """One row per exported column: where it came from, what it means and every transformation applied to it."""
+    data = _load_dictionary(db_dataset.id)
+    if not data.get("columns") or not db_dataset.cleaned_file_path:
+        raise HTTPException(status_code=404, detail="Data dictionary not found. Execute the pipeline first.")
+    buf = io.StringIO()
+    fields = ["column", "dtype", "kind", "source_column", "origin", "meaning", "transformations", "missing", "unique", "min", "max"]
+    writer = csv.DictWriter(buf, fieldnames=fields, extrasaction="ignore")
+    writer.writeheader()
+    for row in data["columns"]:
+        writer.writerow({**row, "transformations": " | ".join(row.get("transformations") or [])})
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="data_dictionary_{_base_name(db_dataset)}.csv"'},
+    )
+
+
+@router.get("/{dataset_id}/export/assignments")
+def download_assignments(db_dataset: Dataset = Depends(get_owned_dataset)):
+    """Cleaned rows with the cluster id (clustering) or anomaly flag / score / votes (anomaly detection)."""
+    path = assignments_file(db_dataset.id)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="No cluster or anomaly labels yet. Run the clustering / anomaly benchmark first.")
+    return FileResponse(path=path, filename=f"labelled_{_base_name(db_dataset)}.csv", media_type="text/csv")
 
 
 @router.get("/{dataset_id}/export/pdf-report")
@@ -121,6 +160,8 @@ def download_manifest_json(db_dataset: Dataset = Depends(get_owned_dataset), db:
             for r in recs
         ],
         "applied_steps": (job.applied_steps or []) if job else [],
+        "data_dictionary": _load_dictionary(dataset_id).get("columns", []),
+        "quality_audit": _load_dictionary(dataset_id).get("quality_audit", []),
         "model_benchmarks": [
             {"rank": b.rank, "model": b.model_name, "metric_name": b.metric_name,
              "metric_value": b.metric_value, "training_time_sec": b.training_time_sec}

@@ -21,6 +21,10 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     logger.info("Starting up AI Data Readiness Platform Backend...")
     init_db()
+    from app.agents.runtime import fail_stale_runs
+    stale = fail_stale_runs()
+    if stale:
+        logger.info(f"Marked {stale} interrupted agent run(s) as failed.")
     removed = cleanup_expired_files()
     if removed:
         logger.info(f"Removed {removed} stored file(s) older than {settings.FILE_RETENTION_DAYS} days.")

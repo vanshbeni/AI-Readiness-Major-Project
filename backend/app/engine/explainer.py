@@ -1,7 +1,7 @@
 import json
 import logging
 import time
-from typing import List, Dict, Any, Optional, Tuple
+from typing import Any, Dict, List
 
 from app.core.config import settings
 
@@ -40,16 +40,66 @@ def generate_fallback_explanation(rec: Dict[str, Any]) -> str:
             f"Column '{col}' is {stats.get('missing_pct', 0.0)}% missing, above the 70% viability threshold. Imputing most of a "
             f"column creates synthetic values, so dropping it is safer. It is off by default because it is destructive."
         )
+    if key == "auto_prep":
+        if stats.get("kind") == "padded_text":
+            return (
+                f"{stats.get('count', 0)} value(s) in '{col}' carry leading or trailing spaces (e.g. "
+                f"{', '.join(repr(e) for e in stats.get('examples', [])[:2])}). ' grace ' and 'grace' would otherwise count as "
+                f"different values, so the spaces are trimmed before profiling."
+            )
+        if stats.get("kind") == "disguised_missing":
+            return (
+                f"{stats.get('count', 0)} cell(s) in '{col}' ({stats.get('pct', 0.0)}%) hold placeholder text such as "
+                f"{', '.join(repr(e) for e in stats.get('examples', [])[:3])} instead of a value. They are counted as missing "
+                f"before profiling, so the health score and the fixes see the real gaps."
+            )
+        return (
+            f"'{col}' holds numbers, but {stats.get('count', 0)} value(s) are written as text "
+            f"({', '.join(repr(e) for e in stats.get('examples', [])[:3])}). They are converted to numbers before profiling, "
+            f"so the column is treated as numeric instead of as a set of fake categories."
+        )
+    if key == "merge_variants":
+        return (
+            f"{stats.get('count', 0)} cell(s) in '{col}' write the same value differently (case or spacing, e.g. "
+            f"{', '.join(repr(k) for k in list((stats.get('mapping') or {}))[:2])}). Without merging, each spelling becomes "
+            f"its own category and splits the signal, so every variant is mapped to its most common clean form."
+        )
+    if key == "drop_personal_data":
+        kind = {"email": "email addresses", "phone": "phone numbers", "person_name": "people's names"}.get(stats.get("kind"), "personal data")
+        return (
+            f"'{col}' contains {kind}. Identifying details do not generalise to new people (a model can only memorise them) "
+            f"and keeping them is a privacy risk, so the column is removed. Any recurring words that do carry signal are "
+            f"extracted first."
+        )
+    if key == "missing_indicator":
+        return (
+            f"'{col}' is {stats.get('missing_pct', 0.0)}% blank. Filling that many cells would invent most of the column, but "
+            f"whether a value was recorded is often informative on its own, so the column is replaced by a 0/1 'has_{col}' flag."
+        )
     if key in ("impute_median", "impute_mean"):
         skew = stats.get("skewness", 0.0)
+        flag = (f" A '{col}_was_missing' flag records exactly which rows were filled, so the filled value never "
+                f"masquerades as a real measurement.") if stats.get("add_flag") else ""
         if key == "impute_median":
+            grouped = (" When another column (e.g. a class or category) clearly explains it, the median of the row's group is "
+                       "used instead of one global value, which keeps natural variation.") if stats.get("group_by") == "auto" else ""
             return (
-                f"Numeric column '{col}' has {stats.get('missing_pct', 0.0)}% missing values and a skewed distribution "
-                f"(skewness {skew}). The median is robust to the long tail, so it fills gaps without being pulled by extremes."
+                f"Numeric column '{col}' has {stats.get('missing_pct', 0.0)}% missing values (skewness {skew}). The median is "
+                f"robust to extremes.{grouped}{flag}"
             )
         return (
             f"Numeric column '{col}' has {stats.get('missing_pct', 0.0)}% missing values and an approximately symmetric "
-            f"distribution (skewness {skew}), so the mean preserves the column's central tendency."
+            f"distribution (skewness {skew}), so the mean preserves the column's central tendency.{flag}"
+        )
+    if key == "extract_prefix":
+        return (
+            f"'{col}' holds codes{_samples(stats)} that are too varied to use directly, but their letter prefix groups rows "
+            f"({', '.join(str(k) for k in stats.get('keep', [])[:5])}). That prefix is kept as a category before the raw code is dropped."
+        )
+    if key == "word_flags":
+        return (
+            f"'{col}' is free text{_samples(stats)}, but some words recur across many rows "
+            f"({', '.join(str(w) for w in stats.get('words', [])[:5])}). Each becomes a 0/1 feature before the raw text is dropped."
         )
     if key == "impute_mode":
         return (
@@ -58,10 +108,10 @@ def generate_fallback_explanation(rec: Dict[str, Any]) -> str:
             f"existing category set intact."
         )
     if key == "impute_unknown":
+        flag = f" and a has_{col} flag records whether a value was present" if stats.get("add_flag", True) else ""
         return (
-            f"'{col}' is a free-text / entity feature ({stats.get('cardinality', 0)} distinct values) with "
-            f"{stats.get('missing_pct', 0.0)}% missing. Assigning the most common entity would inject false signal, so missing "
-            f"entries become 'Unknown' and a has_{col} flag records whether a value was present."
+            f"'{col}' ({stats.get('cardinality', 0)} distinct values) has {stats.get('missing_pct', 0.0)}% missing. Assigning the "
+            f"most common value would inject false signal, so missing entries become an explicit 'Unknown' category{flag}."
         )
     if key == "parse_datetime":
         return (
@@ -81,14 +131,19 @@ def generate_fallback_explanation(rec: Dict[str, Any]) -> str:
     if key == "replace_negatives_median":
         return (
             f"'{col}' has {stats.get('negative_count', 0)} negative values (minimum {stats.get('min_value', 0.0)}) in a "
-            f"quantity that cannot be negative. These are treated as data-entry errors and replaced with the median of the "
-            f"valid values, rather than clipped to an artificial 0."
+            f"quantity that cannot be negative. These are data-entry errors, so they are treated as blanks and filled (and "
+            f"flagged) together with the column's other gaps, rather than clipped to an artificial 0."
         )
     if key == "cap_outliers":
+        if stats.get("extreme_count"):
+            return (
+                f"{stats.get('extreme_count', 0)} value(s) in '{col}' lie beyond the extreme 3x IQR fence "
+                f"[{stats.get('lower_bound', 0.0)}, {stats.get('upper_bound', 0.0)}]. Only those are capped (rows are kept), and a "
+                f"'{col}_was_capped' flag marks them so the repeated boundary value stays explainable."
+            )
         return (
-            f"{stats.get('outlier_count', 0)} values ({stats.get('outlier_pct', 0.0)}%) in '{col}' fall outside the 1.5x IQR "
-            f"range [{stats.get('lower_bound', 0.0)}, {stats.get('upper_bound', 0.0)}]. Capping them at these bounds limits "
-            f"their leverage without discarding rows."
+            f"{stats.get('outlier_count', 0)} values ({stats.get('outlier_pct', 0.0)}%) in '{col}' are beyond 1.5x IQR but none are "
+            f"extreme. Long tails like these are usually real (prices, incomes, counts), so they are kept; capping is optional."
         )
     if key == "drop_collinear":
         return (
@@ -98,6 +153,12 @@ def generate_fallback_explanation(rec: Dict[str, Any]) -> str:
         )
     if key == "drop_constant":
         return f"Column '{col}' has the same value in every row, so it carries no predictive signal and is removed."
+    if key == "drop_leakage":
+        return (
+            f"On its own, '{col}' predicts '{stats.get('target_column')}' almost perfectly ({stats.get('leak_method')} "
+            f"{stats.get('score')}). Real predictors are rarely that clean: this usually means the column is recorded after "
+            f"the outcome or encodes it. Keeping it would make every model look excellent and fail in production."
+        )
     if key == "drop_high_cardinality":
         return (
             f"'{col}' has {stats.get('unique_count', 0)} distinct values ({stats.get('unique_pct', 0.0)}% of rows), so it behaves "
@@ -105,8 +166,8 @@ def generate_fallback_explanation(rec: Dict[str, Any]) -> str:
         )
     if key == "group_rare":
         return (
-            f"'{col}' has {stats.get('unique_count', 0)} categories. Keeping the {stats.get('keep_top', 10)} most frequent and "
-            f"grouping the rest as 'Other' prevents sparse, unreliable indicator columns."
+            f"'{col}' has {stats.get('unique_count', 0)} categories. Up to {stats.get('keep_top', 10)} frequent values that each "
+            f"cover enough rows are kept and the rest become 'Other', so no indicator column describes just a handful of rows."
         )
     if key == "one_hot_encode":
         cols = stats.get("columns", [])
@@ -136,135 +197,70 @@ def _apply_fallback(recommendations: List[Dict[str, Any]]) -> List[Dict[str, Any
     return recommendations
 
 
-RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+EXPLAIN_SYSTEM = (
+    "You are a Senior Data Scientist explaining pre-ML data cleaning decisions.\n"
+    "For each item, write a 2-3 sentence technical justification of WHY the chosen method fits the provided statistics.\n"
+    "RULES:\n"
+    "1. Cite the exact numbers in stats_context.\n"
+    "2. Never invent numbers that are not in the input.\n"
+    "3. Explain the method that was chosen; do not recommend a different one.\n"
+    "4. Return ONLY JSON: {\"items\": [{\"index\": int, \"explanation\": string}]}."
+)
 
 
-def _error_reason(resp) -> str:
+def _explanation_payload(recommendations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [
+        {
+            "index": idx,
+            "issue_type": r["issue_type"],
+            "column": r.get("column"),
+            "method": r["method"],
+            "stats_context": {k: v for k, v in r.get("stats_context", {}).items() if k not in ("method_key", "sample_values", "agent_note")},
+        }
+        for idx, r in enumerate(recommendations)
+    ]
+
+
+def _merge_explanations(recommendations: List[Dict[str, Any]], explanation_map: Dict[int, str]) -> List[Dict[str, Any]]:
+    for idx, rec in enumerate(recommendations):
+        if explanation_map.get(idx):
+            rec["explanation_text"] = str(explanation_map[idx])
+            rec["explanation_source"] = "ai"
+        else:
+            rec["explanation_text"] = generate_fallback_explanation(rec)
+            rec["explanation_source"] = "statistical"
+    return recommendations
+
+
+def _explain_with_openrouter(recommendations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    from app.agents import llm
     try:
-        return str(resp.json().get("error", {}).get("message", ""))[:160]
-    except ValueError:
-        return ""
+        parsed, reply = llm.chat_json(
+            EXPLAIN_SYSTEM,
+            "Data Payload:\n" + json.dumps(_explanation_payload(recommendations), default=str),
+            deadline=time.monotonic() + min(settings.AGENT_RUN_BUDGET_SEC, 120),
+            max_tokens=3000,
+        )
+        items = parsed.get("items", []) if isinstance(parsed, dict) else parsed
+        explanation_map = {
+            int(item["index"]): item["explanation"]
+            for item in items or []
+            if isinstance(item, dict) and "index" in item and item.get("explanation")
+        }
+        logger.info(f"Generated explanations using {reply.model}.")
+        return _merge_explanations(recommendations, explanation_map)
+    except Exception as e:
+        logger.warning(f"OpenRouter explanation generation failed ({type(e).__name__}). Using statistical explanations.")
+        return _apply_fallback(recommendations)
 
-
-def _call_gemini(req_body: Dict[str, Any], api_key: str) -> Optional[Tuple[str, str]]:
+def explain_recommendations(recommendations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    Tries GEMINI_MODEL then GEMINI_FALLBACK_MODELS, retrying transient failures (overload, rate limits, timeouts)
-    with exponential backoff, all within GEMINI_TOTAL_BUDGET_SEC. Returns (model_name, response_text) or None.
-    """
-    import requests
-
-    models: List[str] = []
-    for m in [settings.GEMINI_MODEL, *settings.GEMINI_FALLBACK_MODELS]:
-        if m and m not in models:
-            models.append(m)
-
-    deadline = time.monotonic() + settings.GEMINI_TOTAL_BUDGET_SEC
-    for model_name in models:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
-        for attempt in range(settings.GEMINI_MAX_RETRIES + 1):
-            remaining = deadline - time.monotonic()
-            if remaining < 3:
-                logger.warning("Gemini time budget exhausted. Using statistical explanations.")
-                return None
-            try:
-                resp = requests.post(
-                    url,
-                    json=req_body,
-                    headers={"x-goog-api-key": api_key},
-                    timeout=min(settings.GEMINI_TIMEOUT_SEC, remaining),
-                )
-            except (requests.Timeout, requests.ConnectionError) as e:
-                logger.warning(f"Gemini {model_name} attempt {attempt + 1} failed ({type(e).__name__}).")
-                status, reason, retry_after = None, "", None
-            else:
-                if resp.status_code == 200:
-                    try:
-                        text = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-                    except (ValueError, KeyError, IndexError, TypeError):
-                        logger.warning(f"Gemini {model_name} returned an unexpected response shape (possibly blocked).")
-                        break
-                    return model_name, text
-                status, reason = resp.status_code, _error_reason(resp)
-                retry_after = resp.headers.get("Retry-After")
-                logger.warning(f"Gemini {model_name} attempt {attempt + 1} returned {status}: {reason}")
-                if status in (400, 401, 403):
-                    # Invalid key or request: other models won't fare better.
-                    return None
-                if status not in RETRYABLE_STATUS:
-                    break  # e.g. 404 model not found -> try next model
-
-            if attempt < settings.GEMINI_MAX_RETRIES:
-                delay = 2.0 * (2 ** attempt)
-                if retry_after and retry_after.isdigit():
-                    delay = max(delay, min(float(retry_after), 15.0))
-                if deadline - time.monotonic() - delay < 3:
-                    break
-                time.sleep(delay)
-    logger.warning("All Gemini models failed or are unavailable. Using statistical explanations.")
-    return None
-
-
-def explain_recommendations_with_gemini(recommendations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    Stage 3: Grounded LLM explanation layer. Uses Gemini when configured and falls back to deterministic
-    statistical explanations otherwise. Each recommendation gets `explanation_source` = "ai" | "statistical".
+    Stage 3: grounded LLM explanations via OpenRouter, falling back to deterministic statistical explanations when no
+    key is configured or the model fails. Each recommendation gets explanation_source = "ai" | "statistical".
     """
     if not recommendations:
         return []
-
-    gemini_key = settings.GEMINI_API_KEY.strip()
-    if not gemini_key:
-        return _apply_fallback(recommendations)
-
-    try:
-        items_payload = [
-            {
-                "index": idx,
-                "issue_type": r["issue_type"],
-                "column": r.get("column"),
-                "method": r["method"],
-                "stats_context": {k: v for k, v in r.get("stats_context", {}).items() if k != "method_key"},
-            }
-            for idx, r in enumerate(recommendations)
-        ]
-        system_instruction = (
-            "You are a Senior Data Scientist explaining pre-ML data cleaning decisions.\n"
-            "For each item, write a 2-3 sentence technical justification of WHY the chosen method fits the provided statistics.\n"
-            "RULES:\n"
-            "1. Cite the exact numbers in stats_context.\n"
-            "2. Never invent numbers that are not in the input.\n"
-            "3. Explain the method that was chosen; do not recommend a different one.\n"
-            "4. Return ONLY a JSON array of objects with keys 'index' (int) and 'explanation' (string)."
-        )
-        req_body = {
-            "contents": [{"parts": [{"text": f"{system_instruction}\n\nData Payload:\n{json.dumps(items_payload, indent=2, default=str)}"}]}],
-            "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"},
-        }
-        result = _call_gemini(req_body, gemini_key)
-        if result is None:
-            return _apply_fallback(recommendations)
-        model_name, raw_text = result
-        if raw_text.startswith("```"):
-            raw_text = raw_text.strip("`")
-            if raw_text.startswith("json"):
-                raw_text = raw_text[4:]
-        parsed = json.loads(raw_text.strip())
-        explanation_map = {
-            item["index"]: item["explanation"]
-            for item in parsed
-            if isinstance(item, dict) and "index" in item and item.get("explanation")
-        }
-        for idx, rec in enumerate(recommendations):
-            if idx in explanation_map:
-                rec["explanation_text"] = str(explanation_map[idx])
-                rec["explanation_source"] = "ai"
-            else:
-                rec["explanation_text"] = generate_fallback_explanation(rec)
-                rec["explanation_source"] = "statistical"
-        logger.info(f"Generated explanations using {model_name}.")
-    except Exception as e:
-        # Only the exception type is logged: request exceptions can embed request details.
-        logger.warning(f"Gemini explanation generation failed ({type(e).__name__}). Using statistical explanations.")
-        return _apply_fallback(recommendations)
-
-    return recommendations
+    from app.agents import llm
+    if llm.is_configured():
+        return _explain_with_openrouter(recommendations)
+    return _apply_fallback(recommendations)

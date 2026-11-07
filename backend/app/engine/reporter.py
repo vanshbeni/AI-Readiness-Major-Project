@@ -124,6 +124,7 @@ def generate_pdf_report(
          f"{_signed(round(after_health['composite_score'] - before_score, 1))} pts" if executed else "-"],
     ]
     for label, key in [
+        ("Predictive Signal Sub-score", "signal_score"),
         ("Missingness Sub-score", "missingness_score"),
         ("Duplicate Sub-score", "duplicate_score"),
         ("Outlier Sub-score", "outlier_score"),
